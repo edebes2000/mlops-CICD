@@ -1,0 +1,16 @@
+name: mlops-modularization
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.9
+  - pandas
+  - numpy
+  - scikit-learn
+  - joblib
+  - matplotlib
+  - seaborn
+  - shap
+  - lime
+  - jupyter
+  - ipykernel
+  - pip
