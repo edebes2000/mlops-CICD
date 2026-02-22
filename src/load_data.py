@@ -10,11 +10,9 @@ TODO: Any temporary or hardcoded variable or parameter will be imported from con
 """
 
 from pathlib import Path
-
-import numpy as np
 import pandas as pd
 
-from src.utils import load_csv, save_csv
+from src.utils import load_csv
 
 
 def load_raw_data(raw_data_path: Path) -> pd.DataFrame:
@@ -22,48 +20,40 @@ def load_raw_data(raw_data_path: Path) -> pd.DataFrame:
     Inputs:
     - raw_data_path: Path to the raw CSV file
     Outputs:
-    - df_raw: DataFrame loaded from raw_data_path, or a generated sample dataset for scaffolding
+    - df_raw: DataFrame loaded from raw_data_path
     Why this contract matters for reliable ML delivery:
     - A stable ingestion interface prevents downstream rewiring when data sources evolve
     """
-    print(f"[load_data.load_raw_data] Loading raw data from {raw_data_path}")  # TODO: replace with logging later
+    print(
+        # TODO: replace with logging later
+        f"[load_data.load_raw_data] Loading raw data from {raw_data_path}")
 
+    # 1) Pipeline Guardrail: Missing Data Dependency
     if not raw_data_path.exists():
-        raw_data_path.parent.mkdir(parents=True, exist_ok=True)
-
-        print("Sample dataset created for scaffolding only. Replace with your real dataset.")  # TODO: replace with logging later
-
-        rng = np.random.default_rng(seed=42)
-        n = 10
-
-        df_sample = pd.DataFrame(
-            {
-                "feature_1": np.arange(n, dtype=float),
-                "feature_2": rng.normal(loc=0.0, scale=1.0, size=n),
-            }
+        raise FileNotFoundError(
+            f"Ingestion Error: The raw data file was not found at {raw_data_path}. "
+            f"Please ensure your raw dataset is placed in the 'data/raw/' directory."
         )
-        df_sample["target"] = (df_sample["feature_1"] + df_sample["feature_2"] > 4.5).astype(int)
 
-        save_csv(df_sample, raw_data_path)
+    # 2) Pipeline Guardrail: Not a File
+    if not raw_data_path.is_file():
+        raise ValueError(
+            f"Ingestion Error: {raw_data_path} is a directory, not a file. "
+            "Check RAW_DATA_PATH in src/main.py"
+        )
 
+    # 3) Execute the load via Utility
     df_raw = load_csv(raw_data_path)
 
-    # --------------------------------------------------------
-    # START STUDENT CODE
-    # --------------------------------------------------------
-    # TODO_STUDENT: Replace CSV loading with real ingestion logic
-    # Why: Real systems may load from databases, feature stores, APIs, or partitioned files
-    # Examples:
-    # 1. Load multiple files and concatenate
-    # 2. Enforce a schema and parse dates
-    #
-    # Optional forcing function (leave commented)
-    # raise NotImplementedError("Student: You must implement this logic to proceed!")
-    #
-    # Placeholder (Remove this after implementing your code):
-    print("Warning: Student has not implemented this section yet")
-    # --------------------------------------------------------
-    # END STUDENT CODE
-    # --------------------------------------------------------
+    # 4) Pipeline Guardrail: Empty Data
+    if df_raw.empty:
+        raise ValueError(
+            f"Ingestion Error: The file at {raw_data_path} loaded but contains zero rows. "
+            "Check your data source export."
+        )
+
+    # 5) Observability
+    # TODO: replace with logging later
+    print(f"[load_data.load_raw_data] Loaded dataframe shape: {df_raw.shape}")
 
     return df_raw
