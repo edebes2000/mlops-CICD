@@ -18,33 +18,50 @@ def clean_dataframe(df_raw: pd.DataFrame, target_column: str) -> pd.DataFrame:
     - df_raw: Raw DataFrame
     - target_column: Name of the target column
     Outputs:
-    - df_clean: Cleaned DataFrame (baseline is identity transform)
+    - df_clean: Cleaned DataFrame
     Why this contract matters for reliable ML delivery:
     - Keeping transformations consistent reduces training serving skew and improves reproducibility
+    - Dropping invalid rows here prevents confusing model failures downstream
     """
-    print("[clean_data.clean_dataframe] Cleaning dataframe")  # TODO: replace with logging later
+    # TODO: replace with logging later
+    print("[clean_data.clean_dataframe] Cleaning dataframe")
+
+    if df_raw is None:
+        raise ValueError(
+            "df_raw is None. Check src/load_data.py and RAW_DATA_PATH in src/main.py")
 
     df_clean = df_raw.copy()
+    initial_rows = len(df_clean)
 
-    # --------------------------------------------------------
-    # START STUDENT CODE
-    # --------------------------------------------------------
-    # TODO_STUDENT: Replace or extend the baseline logic here
-    # Why: Cleaning depends on data quality and business meaning, so it varies by dataset
-    # Examples:
-    # 1. Handle missing values and outliers
-    # 2. Encode categorical variables and scale numeric features
-    #
-    # Optional forcing function (leave commented)
-    # raise NotImplementedError("Student: You must implement this logic to proceed!")
-    #
-    # Placeholder (Remove this after implementing your code):
-    print("Warning: Student has not implemented this section yet")
-    # --------------------------------------------------------
-    # END STUDENT CODE
-    # --------------------------------------------------------
+    # 1) Standardize column names
+    # Strip hidden whitespace and remove spaces explicitly
+    # e.g. makes "rx ds" become "rx_ds" for stable downstream contracts
+    df_clean.columns = df_clean.columns.str.strip().str.replace(" ", "_", regex=False)
 
+    # 2) Drop non predictive identifier columns (idempotent)
+    df_clean = df_clean.drop(columns=["ID"], errors="ignore")
+
+    # 3) Remove duplicates and missing values
+    df_clean = df_clean.drop_duplicates()
+    df_clean = df_clean.dropna()
+
+    # 4) Reset index to prevent downstream alignment bugs
+    df_clean = df_clean.reset_index(drop=True)
+
+    # MLOps Observability: Log data loss and final state
+    dropped_rows = initial_rows - len(df_clean)
+    if dropped_rows > 0:
+        # TODO: replace with logging later
+        print(
+            f"[clean_data.clean_dataframe] Dropped {dropped_rows} rows due to NA or duplicates")
+    # TODO: replace with logging later
+    print(f"[clean_data.clean_dataframe] Rows after cleaning: {len(df_clean)}")
+
+    # Fail fast: pipeline cannot train without a target column
     if target_column not in df_clean.columns:
-        print(f"[clean_data.clean_dataframe] Warning: target column '{target_column}' not found")  # TODO: replace with logging later
+        raise ValueError(
+            f"Fatal: target column '{target_column}' missing after cleaning. "
+            "Check TARGET_COLUMN in src/main.py and your raw CSV headers"
+        )
 
     return df_clean
