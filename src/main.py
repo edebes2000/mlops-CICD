@@ -38,7 +38,8 @@ SETTINGS = {
         "quantile_bin": ["rx_ds"],
         "categorical_onehot": [],
         "numeric_passthrough": [],
-        "n_bins": 3,
+        "binary_sum_cols": [],
+        "n_bins": 4,
     },
 }
 
@@ -93,6 +94,7 @@ def main():
         SETTINGS["features"]["quantile_bin"]
         + SETTINGS["features"]["categorical_onehot"]
         + SETTINGS["features"]["numeric_passthrough"]
+        + SETTINGS["features"]["binary_sum_cols"]
     )
     if not configured_cols:
         raise ValueError(
@@ -114,6 +116,7 @@ def main():
         quantile_bin_cols=SETTINGS["features"]["quantile_bin"],
         categorical_onehot_cols=SETTINGS["features"]["categorical_onehot"],
         numeric_passthrough_cols=SETTINGS["features"]["numeric_passthrough"],
+        binary_sum_cols=SETTINGS["features"]["binary_sum_cols"],
         n_bins=SETTINGS["features"]["n_bins"],
     )
 
