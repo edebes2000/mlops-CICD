@@ -1,49 +1,48 @@
 # src/features.py
 """
 Educational Goal:
-- Why this module exists in an MLOps system: Isolate feature engineering rules from their execution to prevent leakage and drift.
-- Responsibility (separation of concerns): Define the preprocessing recipe as a ColumnTransformer. No file I/O, no .fit() calls here.
-- Pipeline contract: Inputs are configuration lists. Output is a scikit-learn ColumnTransformer.
-
-Where do transformations belong?
-- Stateful transformations (MUST be fitted on X_train only) belong here. Example: Quantile bin edges.
-- Stateless transformations (Math operations) CAN belong here if they are part of the model's unique contract. Example: binary_sum. Putting it here ensures the deployed model calculates it automatically.
-- Only put stateless transforms in `clean_data.py` if they are part of a canonical, company-wide data schema used beyond just this model.
+- Why this module exists in an MLOps system: Define feature engineering rules as a reusable recipe that can be fitted safely on training data only
+- Responsibility (separation of concerns): Build and return a ColumnTransformer recipe. No file I/O, no .fit() calls here
+- Pipeline contract (inputs and outputs): Inputs are configuration lists. Output is a scikit-learn ColumnTransformer
 
 Why this prevents leakage:
-- The recipe is fitted ONLY inside `pipeline.fit(X_train, y_train)` inside train.py.
+- The recipe is fitted only inside pipeline.fit(X_train, y_train) in train.py
 
 TODO: Replace print statements with standard library logging in a later session
 TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
 """
 
-import numpy as np
 from typing import List, Optional
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import KBinsDiscretizer, OneHotEncoder, FunctionTransformer
 
-# We avoid using pandas in this module to prevent accidental data manipulation.
+import numpy as np
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import (
+    FunctionTransformer,
+    KBinsDiscretizer,
+    OneHotEncoder,
+    StandardScaler,
+)
 
 
 def _row_sum_numpy(X) -> np.ndarray:
     """
     Inputs:
-    - X: 2D array-like (DataFrame or numpy array) containing binary or numeric indicators.
+    - X: 2D array-like (DataFrame or ndarray) of indicator columns
     Outputs:
-    - sums: 2D numpy array of shape (n_rows, 1) containing row-wise sums.
+    - sums: 2D numpy array of shape (n_rows, 1)
 
-    MLOps Note: We use np.asarray(X) here to ensure that if a Pandas DataFrame 
-    is passed, it is converted to a NumPy array before the reshape operation.
+    Why this contract matters for reliable ML delivery:
+    - Derived features must be computed the same way in training and inference
     """
-    # Cast X to a numpy array first to guarantee .reshape() works
-    sums = np.sum(np.asarray(X), axis=1).reshape(-1, 1)
-    return sums
+    # FunctionTransformer may pass a pandas object, so we convert explicitly
+    X_np = np.asarray(X)
+    if X_np.ndim == 1:
+        X_np = X_np.reshape(-1, 1)
 
-# This function is the "recipe" for our feature engineering.
-# It takes in configuration lists and outputs a ColumnTransformer that can be fitted
-# and applied to data later in the pipeline.
-# By keeping it separate from any data, we prevent leakage and ensure the same transformations
-# are applied consistently to both training and test data.
+    sums = np.sum(X_np, axis=1).reshape(-1, 1)
+    return sums
 
 
 def get_feature_preprocessor(
@@ -55,83 +54,95 @@ def get_feature_preprocessor(
 ) -> ColumnTransformer:
     """
     Inputs:
-    - quantile_bin_cols: List of numeric column names to be bucketed into quantiles.
-    - categorical_onehot_cols: List of categorical column names to be one-hot encoded.
-    - numeric_passthrough_cols: List of already-engineered numeric columns to leave untouched.
-    - binary_sum_cols: List of binary flag columns to be summed together into a single feature.
-    - n_bins: The number of quantile buckets to create.
+    - quantile_bin_cols: Numeric columns to bucket into quantiles
+    - categorical_onehot_cols: Categorical columns to one hot encode
+    - numeric_passthrough_cols: Numeric columns to keep as numeric features
+    - binary_sum_cols: Indicator columns to sum into one derived feature
+    - n_bins: Number of quantile buckets
     Outputs:
-    - preprocessor: A scikit-learn ColumnTransformer object representing the recipe.
+    - preprocessor: Unfitted ColumnTransformer recipe
 
     Why this contract matters for reliable ML delivery:
-    - By taking lists of strings instead of a DataFrame, this function cannot accidentally fit or transform data. It strictly returns the "rules of the game" for the pipeline to execute later.
+    - This function defines the recipe only. Fitting happens later on X_train only
     """
-    print("[features.get_feature_preprocessor] Building feature recipe from configuration")
+    print("[features.get_feature_preprocessor] Building feature recipe from configuration")  # TODO: replace with logging later
 
     if n_bins < 2:
-        raise ValueError("Fatal: n_bins must be >= 2 for quantile binning.")
+        raise ValueError("Fatal: n_bins must be >= 2 for quantile binning")
 
-    # Ensure we have empty lists instead of None to prevent iteration errors
     quantile_bin_cols = quantile_bin_cols or []
     categorical_onehot_cols = categorical_onehot_cols or []
     numeric_passthrough_cols = numeric_passthrough_cols or []
     binary_sum_cols = binary_sum_cols or []
 
-    # Fail-fast: If the recipe is entirely empty, the pipeline will break later anyway.
     if not (quantile_bin_cols or categorical_onehot_cols or numeric_passthrough_cols or binary_sum_cols):
         raise ValueError(
-            "Fatal: No feature columns configured for the preprocessor.")
+            "Fatal: No feature columns configured for the preprocessor")
 
     transformers = []
 
-    # Replacing pd.qcut() and pd.get_dummies()
-    # In a notebook, you might use pd.qcut() to create buckets like 'rx_ds_bucket_Q4'.
-    # In MLOps, we use KBinsDiscretizer. It learns the exact bin edges on X_train
-    # and enforces those exact same edges on X_test, preventing data leakage.
+    # 1) Quantile features: Impute -> Quantile bin -> Scale
+    # We use encode="ordinal" so bins become numeric codes (0, 1, 2, ...)
+    # Then scaling makes these codes comparable to other numeric features
     if quantile_bin_cols:
-        quantile_binner = KBinsDiscretizer(
-            n_bins=n_bins,
-            encode="onehot-dense",  # Dense output for easier classroom debugging
-            strategy="quantile",
+        quantile_pipe = Pipeline(
+            steps=[
+                ("impute", SimpleImputer(strategy="median")),
+                ("qbin", KBinsDiscretizer(n_bins=n_bins,
+                 encode="ordinal", strategy="quantile")),
+                ("scale", StandardScaler()),
+            ]
         )
         transformers.append(
-            ("quantile_bins", quantile_binner, quantile_bin_cols))
+            ("quantile_bins", quantile_pipe, quantile_bin_cols))
 
-    # Handling Categoricals
-    # We use handle_unknown="ignore" so the pipeline doesn't crash if X_test
-    # contains a category that wasn't present in X_train.
+    # 2) Categorical features: Impute -> One hot encode
+    # handle_unknown="ignore" prevents crashes when new categories appear at inference time
     if categorical_onehot_cols:
         try:
-            # Modern scikit-learn versions (1.2+)
             onehot = OneHotEncoder(
                 handle_unknown="ignore", sparse_output=False)
         except TypeError:
-            # Fallback for older scikit-learn versions to prevent classroom crashes
+            # Older scikit-learn versions
             onehot = OneHotEncoder(handle_unknown="ignore", sparse=False)
-        transformers.append(("cat_ohe", onehot, categorical_onehot_cols))
 
-    # Engineered Features via FunctionTransformer
-    # Instead of doing df['binary_sum'] = df[['P_D', 'P_P', 'S_P']].sum(axis=1) in Pandas,
-    # we embed it in the Pipeline. The deployed model will now calculate this automatically.
-    if binary_sum_cols:
-        binary_sum_transformer = FunctionTransformer(
-            func=_row_sum_numpy,
-            validate=False,
-            feature_names_out=lambda self, input_features: np.array([
-                                                                    "binary_sum"]),
+        cat_pipe = Pipeline(
+            steps=[
+                ("impute", SimpleImputer(strategy="most_frequent")),
+                ("ohe", onehot),
+            ]
         )
-        transformers.append(
-            ("binary_sum", binary_sum_transformer, binary_sum_cols))
+        transformers.append(("cat_ohe", cat_pipe, categorical_onehot_cols))
 
-    # Handling Clean Features
+    # 3) Derived feature: binary_sum, treated as a numeric feature
+    # We compute it inside the pipeline so training and inference always match
+    # feature_names_out is used only to give the derived column a stable name in debugging and tests
+    if binary_sum_cols:
+        binary_sum_pipe = Pipeline(
+            steps=[
+                ("impute", SimpleImputer(strategy="most_frequent")),
+                ("sum", FunctionTransformer(
+                    func=_row_sum_numpy,
+                    validate=False,
+                    feature_names_out=lambda self, input_features: np.array([
+                                                                            "binary_sum"]),
+                )),
+                ("scale", StandardScaler()),
+            ]
+        )
+        transformers.append(("binary_sum", binary_sum_pipe, binary_sum_cols))
+
+    # 4) Standard numeric features: Impute -> Scale
     if numeric_passthrough_cols:
-        transformers.append(
-            ("num_pass", "passthrough", numeric_passthrough_cols))
+        num_pipe = Pipeline(
+            steps=[
+                ("impute", SimpleImputer(strategy="median")),
+                ("scale", StandardScaler()),
+            ]
+        )
+        transformers.append(("num_scaled", num_pipe, numeric_passthrough_cols))
 
-    # The Gatekeeper (remainder="drop")
-    # This acts as a strict filter. Any column in the raw data that is NOT explicitly
-    # listed in one of our configuration lists above will be silently dropped.
-    # This prevents raw ID columns or timestamps from accidentally leaking into the model.
+    # Gatekeeper: only configured columns enter the model
     preprocessor = ColumnTransformer(
         transformers=transformers,
         remainder="drop",
