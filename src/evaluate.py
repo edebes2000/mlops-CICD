@@ -26,7 +26,9 @@ def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series, problem_type:
     Why this contract matters for reliable ML delivery:
     - Consistent evaluation supports objective go or no go decisions and reduces quality regressions
     """
-    print(f"[evaluate.evaluate_model] Evaluating model for problem_type={problem_type}")  # TODO: replace with logging later
+    print(
+        # TODO: replace with logging later
+        f"[evaluate.evaluate_model] Evaluating model for problem_type={problem_type}")
 
     y_pred = model.predict(X_test)
     pt = (problem_type or "").strip().lower()
@@ -57,5 +59,6 @@ def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series, problem_type:
     # END STUDENT CODE
     # --------------------------------------------------------
 
-    print(f"[evaluate.evaluate_model] {metric_name}={metric_value}")  # TODO: replace with logging later
+    # TODO: replace with logging later
+    print(f"[evaluate.evaluate_model] {metric_name}={metric_value}")
     return metric_value
