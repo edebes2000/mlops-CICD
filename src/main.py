@@ -31,6 +31,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RAW_DATA_PATH = PROJECT_ROOT / "data" / "raw" / "opiod_raw_data.csv"
 CLEAN_DATA_PATH = PROJECT_ROOT / "data" / "processed" / "clean.csv"
 MODEL_PATH = PROJECT_ROOT / "models" / "model.joblib"
+PREDICTIONS_PATH = PROJECT_ROOT / "reports" / \
+    "predictions.csv"  # New: Persist inference outputs
 
 BINARY_SUM_COLS = [
     "A", "B", "C", "D", "E", "F",
@@ -113,7 +115,6 @@ def _three_way_split(
         return X_train, X_val, X_test, y_train, y_val, y_test
 
     except ValueError as e:
-        # TODO: logging later
         print(
             f"[main] Warning: Stratified split failed: {e}. Falling back to random split.")
 
@@ -135,7 +136,7 @@ def _three_way_split(
 
 
 def main():
-    print("[main.main] Starting pipeline")  # TODO: replace with logging later
+    print("[main.main] Starting pipeline")
 
     if SETTINGS.get("is_example_config", False):
         raise ValueError(
@@ -143,20 +144,19 @@ def main():
         )
 
     # 1) LOAD
-    print("[main.main] 1) LOAD")  # TODO: replace with logging later
+    print("[main.main] 1) LOAD")
     df_raw = load_raw_data(RAW_DATA_PATH)
 
     # 2) CLEAN
-    print("[main.main] 2) CLEAN")  # TODO: replace with logging later
+    print("[main.main] 2) CLEAN")
     df_clean = clean_dataframe(df_raw, target_column=SETTINGS["target_column"])
 
     # 3) SAVE PROCESSED CSV
-    # TODO: replace with logging later
     print("[main.main] 3) SAVE PROCESSED CSV")
     save_csv(df_clean, CLEAN_DATA_PATH)
 
     # 4) VALIDATE
-    print("[main.main] 4) VALIDATE")  # TODO: replace with logging later
+    print("[main.main] 4) VALIDATE")
     required_columns = (
         [SETTINGS["target_column"]]
         + SETTINGS["features"]["quantile_bin"]
@@ -164,11 +164,14 @@ def main():
         + SETTINGS["features"]["numeric_passthrough"]
         + SETTINGS["features"]["binary_sum_cols"]
     )
+    # Deduplicate required columns to prevent accidental duplicate checks
+    required_columns = list(dict.fromkeys(required_columns))
 
     validate_dataframe(
         df=df_clean,
         required_columns=required_columns,
-        check_missing_values=True,
+        # <--- FIXED: Must be False so features.py imputers can work!
+        check_missing_values=False,
         target_column=SETTINGS["target_column"],
         target_allowed_values=[
             0, 1] if SETTINGS["problem_type"] == "classification" else None,
@@ -176,7 +179,6 @@ def main():
     )
 
     # 5) SPLIT
-    # TODO: replace with logging later
     print("[main.main] 5) SPLIT INTO TRAIN, VALIDATION, TEST")
     X = df_clean.drop(columns=[SETTINGS["target_column"]])
     y = df_clean[SETTINGS["target_column"]]
@@ -190,9 +192,14 @@ def main():
         stratify=(SETTINGS["problem_type"] == "classification"),
     )
 
-    print("[main.main] Split sizes")  # TODO: replace with logging later
+    print("[main.main] Split sizes")
     print("Train:", X_train.shape, "Validation:",
           X_val.shape, "Test:", X_test.shape)
+
+    # Fail fast if the test vault is unexpectedly empty
+    if len(X_test) == 0:
+        raise ValueError(
+            "Fatal: test split is empty. Check split ratios and dataset size.")
 
     # 6) FAIL FAST FEATURE CHECKS
     configured_cols = (
@@ -217,7 +224,6 @@ def main():
             )
 
     # 7) BUILD FEATURE RECIPE
-    # TODO: replace with logging later
     print("[main.main] 7) BUILD FEATURE RECIPE")
     preprocessor = get_feature_preprocessor(
         quantile_bin_cols=SETTINGS["features"]["quantile_bin"],
@@ -228,7 +234,7 @@ def main():
     )
 
     # 8) TRAIN
-    print("[main.main] 8) TRAIN")  # TODO: replace with logging later
+    print("[main.main] 8) TRAIN")
     model_pipeline = train_model(
         X_train=X_train,
         y_train=y_train,
@@ -237,7 +243,6 @@ def main():
     )
 
     # 8.5) EVALUATE
-    # TODO: replace with logging later
     print("[main.main] 8.5) EVALUATE (VALIDATION)")
     val_metric = evaluate_model(
         model=model_pipeline,
@@ -245,18 +250,17 @@ def main():
         y_eval=y_val,
         problem_type=SETTINGS["problem_type"],
     )
-    # TODO: replace with logging later
     print(f"[main.main] Validation metric={val_metric:.4f}")
 
     # 9) SAVE MODEL
-    print("[main.main] 9) SAVE MODEL")  # TODO: replace with logging later
+    print("[main.main] 9) SAVE MODEL")
     save_model(model_pipeline, MODEL_PATH)
 
     # 10) INFERENCE DEMO
-    # TODO: replace with logging later
-    print("[main.main] 10) INFERENCE DEMO (10 ROWS FROM TEST)")
+    print("[main.main] 10) INFERENCE DEMO (SAMPLED FROM TEST)")
+    sample_n = min(10, len(X_test))  # Robust sampling
     X_infer_sample = X_test.sample(
-        n=10, random_state=SETTINGS["split"]["random_state"])
+        n=sample_n, random_state=SETTINGS["split"]["random_state"])
 
     df_predictions = run_inference(
         model=model_pipeline,
@@ -264,12 +268,16 @@ def main():
         include_proba=(SETTINGS["problem_type"] == "classification"),
     )
 
-    print("[main.main] Inference results")  # TODO: replace with logging later
+    print("[main.main] Inference results")
     print(df_predictions.head(10))
 
-    print("[main.main] Done")  # TODO: replace with logging later
+    # Persist inference output as an audit artifact
+    save_csv(df_predictions, PREDICTIONS_PATH)
+
+    print("[main.main] Done")
     print(f"[main.main] Wrote {CLEAN_DATA_PATH}")
     print(f"[main.main] Wrote {MODEL_PATH}")
+    print(f"[main.main] Wrote {PREDICTIONS_PATH}")
 
 
 if __name__ == "__main__":
