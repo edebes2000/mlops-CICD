@@ -46,32 +46,39 @@ This project follows a strict separation between "Sandbox" (Notebooks) and "Prod
 
 ```text
 .
-├── README.md                # This file (Project definition)
-├── environment.yml          # Dependencies (Conda/Pip)
-├── config.yaml              # Global configuration (paths, params)
-├── .env                     # Secrets placeholder
-│
-├── notebooks/               # Experimental sandbox
-│   └── yourbaseline.ipynb   # From previous work
-│
-├── src/                     # Production code (The "Factory")
-│   ├── load_data.py         # Ingest raw data
-│   ├── clean_data.py        # Preprocessing & cleaning
-│   ├── validate.py          # Data quality checks
-│   ├── train.py             # Model training & saving
-│   ├── evaluate.py          # Metrics & plotting
-│   ├── infer.py             # Inference logic
-│   └── main.py              # Pipeline orchestrator
-│
-├── data/                    # Local storage (IGNORED by Git)
-│   ├── raw/                 # Immutable input data
-│   └── processed/           # Cleaned data ready for training
-│
-├── models/                  # Serialized artifacts (IGNORED by Git)
-│
-├── reports/                 # Generated metrics, plots, and figures
-│
-└── tests/                   # Automated tests
+├── LICENSE
+├── README.md
+├── config.yaml
+├── data
+│   ├── inference
+│   ├── processed
+│   └── raw
+│       └── opiod_raw_data.csv
+├── environment.yml
+├── models
+│   └── model.joblib
+├── notebooks
+│   ├── 00_opioid_analysis_vLegacy.ipynb
+│   └── 01_opioid_analysis_vExp.ipynb
+├── pytest.ini
+├── reports
+│   └── predictions.csv
+├── src
+│   ├── __init__.py
+│   ├── clean_data.py
+│   ├── evaluate.py
+│   ├── features.py
+│   ├── infer.py
+│   ├── load_data.py
+│   ├── main.py
+│   ├── train.py
+│   ├── utils.py
+│   └── validate.py
+└── tests
+    ├── test_clean_data.py
+    ├── test_features.py
+    ├── test_load_data.py
+    └── test_validate.py
 ```
 
 ## 5. Execution Model

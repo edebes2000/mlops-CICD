@@ -3,59 +3,80 @@
 Educational Goal:
 - Why this module exists in an MLOps system: Provide consistent evaluation to compare runs and prevent regressions
 - Responsibility (separation of concerns): Only computes metrics, no training or artifact writing
-- Pipeline contract (inputs and outputs): Inputs are model and test data, output is a single float metric
+- Pipeline contract: Inputs are a fitted model and evaluation data, output is a single float metric
 
 TODO: Replace print statements with standard library logging in a later session
 TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
 """
 
+from typing import Optional
 import numpy as np
 import pandas as pd
 from sklearn.metrics import f1_score, mean_squared_error
 
 
-def evaluate_model(model, X_test: pd.DataFrame, y_test: pd.Series, problem_type: str) -> float:
+def _normalize_problem_type(problem_type: Optional[str]) -> str:
     """
     Inputs:
-    - model: Fitted model with predict method
-    - X_test: Test features
-    - y_test: Test target
+    - problem_type: Raw problem type string
+    Outputs:
+    - normalized: "classification" or "regression"
+
+    Why this contract matters for reliable ML delivery:
+    - Strict normalization avoids silent configuration errors and makes failures actionable
+    """
+    return (problem_type or "").strip().lower()
+
+
+def evaluate_model(model, X_eval: pd.DataFrame, y_eval: pd.Series, problem_type: str) -> float:
+    """
+    Inputs:
+    - model: Fitted model or Pipeline with predict()
+    - X_eval: Evaluation features (use Validation split for development)
+    - y_eval: Evaluation target
     - problem_type: "regression" or "classification"
     Outputs:
     - metric_value: RMSE for regression or F1 score for classification
+
     Why this contract matters for reliable ML delivery:
-    - Consistent evaluation supports objective go or no go decisions and reduces quality regressions
+    - Consistent evaluation supports objective go/no-go decisions and reduces quality regressions
     """
-    print(f"[evaluate.evaluate_model] Evaluating model for problem_type={problem_type}")  # TODO: replace with logging later
+    print("[evaluate.evaluate_model] Starting evaluation")  # TODO: replace with logging later
 
-    y_pred = model.predict(X_test)
-    pt = (problem_type or "").strip().lower()
+    # 1) Fail-fast structural guardrails
+    if X_eval is None or len(X_eval) == 0:
+        raise ValueError("Fatal: X_eval is empty. Cannot evaluate model.")
+    if y_eval is None or len(y_eval) == 0:
+        raise ValueError("Fatal: y_eval is empty. Cannot evaluate model.")
+    if len(X_eval) != len(y_eval):
+        raise ValueError(
+            f"Fatal: X_eval rows ({len(X_eval)}) do not match y_eval rows ({len(y_eval)}).")
 
+    # Enforce Pipeline Contract: The artifact must be able to predict
+    if not hasattr(model, "predict"):
+        raise TypeError(
+            f"Fatal: model must implement predict(), got type={type(model)}")
+
+    # 2) Execute inference
+    pt = _normalize_problem_type(problem_type)
+    y_pred = model.predict(X_eval)
+
+    # 3) Calculate metric
     if pt == "classification":
-        metric_value = float(f1_score(y_test, y_pred, average="binary"))
-        metric_name = "F1"
+        # Assumes target is binary {0,1} as validated in main.py
+        metric_value = float(f1_score(y_eval, y_pred, average="binary"))
+        # TODO: replace with logging later
+        print(f"[evaluate.evaluate_model] Metric=F1 value={metric_value:.4f}")
+        return metric_value
+
+    elif pt == "regression":
+        # np.sqrt is universally compatible across all scikit-learn versions
+        metric_value = float(np.sqrt(mean_squared_error(y_eval, y_pred)))
+        # TODO: replace with logging later
+        print(
+            f"[evaluate.evaluate_model] Metric=RMSE value={metric_value:.4f}")
+        return metric_value
+
     else:
-        rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
-        metric_value = rmse
-        metric_name = "RMSE"
-
-    # --------------------------------------------------------
-    # START STUDENT CODE
-    # --------------------------------------------------------
-    # TODO_STUDENT: Replace or extend the baseline logic here
-    # Why: Metrics should reflect business success criteria and error costs
-    # Examples:
-    # 1. Add Mean Absolute Error for regression
-    # 2. Add Precision and Recall for classification
-    #
-    # Optional forcing function (leave commented)
-    # raise NotImplementedError("Student: You must implement this logic to proceed!")
-    #
-    # Placeholder (Remove this after implementing your code):
-    print("Warning: Student has not implemented this section yet")
-    # --------------------------------------------------------
-    # END STUDENT CODE
-    # --------------------------------------------------------
-
-    print(f"[evaluate.evaluate_model] {metric_name}={metric_value}")  # TODO: replace with logging later
-    return metric_value
+        raise ValueError(
+            f"Fatal: Unsupported problem_type '{problem_type}'. Use 'classification' or 'regression'.")
