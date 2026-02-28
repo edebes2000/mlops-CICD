@@ -10,7 +10,6 @@ TODO: Any temporary or hardcoded variable or parameter will be imported from con
 """
 
 from typing import Any, List, Optional
-
 import pandas as pd
 
 
@@ -96,6 +95,13 @@ def validate_dataframe(
             raise ValueError(
                 f"Validation failed: numeric_non_negative_cols includes missing column '{col}'")
 
+        # Defensive Check: Ensure the column is actually numeric before checking for < 0
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            raise TypeError(
+                f"Validation failed: Column '{col}' is in numeric_non_negative_cols but is not a numeric type."
+            )
+
+        # Negative value check (Properly indented at the same level as the TypeError check)
         if (df[col] < 0).any():
             raise ValueError(
                 f"Validation failed: Column '{col}' contains negative values")
