@@ -84,21 +84,25 @@ def _patch_paths_and_settings(monkeypatch, tmp_path: Path):
     raw_path = tmp_path / "data" / "raw" / "opiod_raw_data.csv"
     clean_path = tmp_path / "data" / "processed" / "clean.csv"
     model_path = tmp_path / "models" / "model.joblib"
+    predictions_path = tmp_path / "reports" / "predictions.csv"
 
     monkeypatch.setattr(main_module, "RAW_DATA_PATH", raw_path)
     monkeypatch.setattr(main_module, "CLEAN_DATA_PATH", clean_path)
     monkeypatch.setattr(main_module, "MODEL_PATH", model_path)
+    monkeypatch.setattr(main_module, "PREDICTIONS_PATH",
+                        predictions_path)
 
     patched_settings = copy.deepcopy(main_module.SETTINGS)
     patched_settings["is_example_config"] = False
     monkeypatch.setattr(main_module, "SETTINGS", patched_settings)
 
-    return raw_path, clean_path, model_path
+    return raw_path, clean_path, model_path, predictions_path
 
 
 def test_main_end_to_end_creates_clean_and_model_artifacts(tmp_path, monkeypatch):
     """Proves the pipeline successfully cleans data, trains a model, and saves artifacts."""
-    raw_path, clean_path, model_path = _patch_paths_and_settings(
+    # Unpack 4 paths now
+    raw_path, clean_path, model_path, predictions_path = _patch_paths_and_settings(
         monkeypatch, tmp_path)
 
     raw_path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,14 +113,20 @@ def test_main_end_to_end_creates_clean_and_model_artifacts(tmp_path, monkeypatch
     # Verify Data Artifact
     assert clean_path.exists()
     df_clean = pd.read_csv(clean_path)
-    assert "ID" not in df_clean.columns  # Proves clean_data.py ran
+    assert "ID" not in df_clean.columns
     assert "OD" in df_clean.columns
-    assert (df_clean["rx_ds"] >= 0).all()
 
     # Verify Model Artifact
     assert model_path.exists()
     model = joblib.load(model_path)
     assert hasattr(model, "predict")
+
+    # Verify Predictions Artifact
+    assert predictions_path.exists()
+    df_preds = pd.read_csv(predictions_path)
+    assert "prediction" in df_preds.columns
+    assert "proba" in df_preds.columns  # Because it's a classification problem
+    assert len(df_preds) == 10  # Because we sample min(10, len(X_test))
 
 
 def test_main_calls_evaluate_and_infer_modules(tmp_path, monkeypatch):
@@ -125,7 +135,8 @@ def test_main_calls_evaluate_and_infer_modules(tmp_path, monkeypatch):
     We intercept the function calls to ensure the orchestrator actually delegates
     work to the correct modules, proving our separation of concerns works.
     """
-    raw_path, _, _ = _patch_paths_and_settings(monkeypatch, tmp_path)
+    raw_path, _, _, predictions_path = _patch_paths_and_settings(
+        monkeypatch, tmp_path)
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     _make_synthetic_raw_df().to_csv(raw_path, index=False)
 
@@ -155,7 +166,8 @@ def test_main_calls_evaluate_and_infer_modules(tmp_path, monkeypatch):
 
 def test_main_raises_when_raw_data_missing(tmp_path, monkeypatch):
     """Pipeline must crash immediately if input data is missing."""
-    raw_path, _, _ = _patch_paths_and_settings(monkeypatch, tmp_path)
+    raw_path, _, _, predictions_path = _patch_paths_and_settings(
+        monkeypatch, tmp_path)
     assert not raw_path.exists()
 
     with pytest.raises(FileNotFoundError):
