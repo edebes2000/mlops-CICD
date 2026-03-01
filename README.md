@@ -141,16 +141,29 @@ This repository is a teaching scaffold for **Machine Learning Operations (MLOps)
 Build and activate the Conda environment:
 ```
 conda env create -f environment.yml
-conda activate mlops-modulddfdf
+conda activate mlops-modul
 ```
-### Step 2: Run the Test Suite
+
+### Step 2: Exploratory Sandbox (The Lab Bench)
+Before running the automated pipeline, interactively explore the data and debug your custom modules using the provided Jupyter Notebook. 
+
+* **The Sandbox (`notebooks/01_opioid_analysis_vExp.ipynb`):** This is the data scientist's "lab bench" for interactive inspection, rapid iteration, and viewing intermediate states. To protect the audit vault and prevent stale outputs, it runs entirely in memory and **does not** write production artifacts to disk.
+* **The Orchestrator (`src/main.py`):** This is the automated "factory". It provides deterministic, reproducible execution and is the *only* entry point authorized to write canonical production artifacts to your hard drive.
+
+Launch the sandbox:
+```
+jupyter notebook
+notebooks/01_opioid_analysis_vExp.ipynb
+```
+
+### Step 3: Run the Test Suite
 Ensure the codebase is mathematically sound and pipeline contracts are unbroken:
 ```
-python -m pytest -q tests/
+python -m pytest -q
 ```
 > (You should see 100% passing tests!)
 
-### Step 3: Execute the Orchestrator
+### Step 4: Execute the Orchestrator
 Run the end-to-end machine learning pipeline to clean data, train the model, and generate artifacts:
 ```
 python -m src.main
