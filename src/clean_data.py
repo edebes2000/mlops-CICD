@@ -1,67 +1,79 @@
-# src/clean_data.py
-"""
-Educational Goal:
-- Why this module exists in an MLOps system: Isolate dataset specific transformations so they are repeatable and testable
-- Responsibility (separation of concerns): Only cleaning and transformation, no file I/O and no model work
-- Pipeline contract (inputs and outputs): Input is raw DataFrame, output is cleaned DataFrame ready for splitting
-
-TODO: Replace print statements with standard library logging in a later session
-TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
-"""
-
+from typing import Optional
 import pandas as pd
 
 
-def clean_dataframe(df_raw: pd.DataFrame, target_column: str) -> pd.DataFrame:
+def clean_dataframe(df_raw: pd.DataFrame, target_column: Optional[str] = None) -> pd.DataFrame:
     """
-    Inputs:
-    - df_raw: Raw DataFrame
-    - target_column: Name of the target column
-    Outputs:
-    - df_clean: Cleaned DataFrame
-    Why this contract matters for reliable ML delivery:
-    - Keeping transformations consistent reduces training serving skew and improves reproducibility
-    - Dropping invalid rows here prevents confusing model failures downstream
+    One cleaner for both training and inference
+
+    Training mode (target_column provided)
+    - Standardize headers
+    - Drop exact duplicates
+    - Drop rows with missing target
+
+    Inference mode (target_column None)
+    - Standardize headers
+    - Drop exact duplicates
+    - Do not require or drop based on target
     """
-    # TODO: replace with logging later
-    print("[clean_data.clean_dataframe] Cleaning dataframe")
+    print("[clean_data.clean_dataframe] Cleaning dataframe")  # TODO: replace with logging later
 
     if df_raw is None:
         raise ValueError(
             "df_raw is None. Check src/load_data.py and RAW_DATA_PATH in src/main.py")
 
+    if not isinstance(df_raw, pd.DataFrame):
+        raise TypeError(
+            f"df_raw must be a pandas DataFrame, got type={type(df_raw)}")
+
     df_clean = df_raw.copy()
     initial_rows = len(df_clean)
 
-    # 1) Standardize column names
-    # Strip hidden whitespace and remove spaces explicitly
-    # e.g. makes "rx ds" become "rx_ds" for stable downstream contracts
-    df_clean.columns = df_clean.columns.str.strip().str.replace(" ", "_", regex=False)
+    # Standardize headers to keep downstream contracts stable
+    df_clean.columns = (
+        df_clean.columns
+        .astype(str)
+        .str.strip()
+        .str.replace(" ", "_", regex=False)
+    )
 
-    # 2) Drop non predictive identifier columns (idempotent)
-    df_clean = df_clean.drop(columns=["ID"], errors="ignore")
-
-    # 3) Remove duplicates and missing values
+    # Teaching note
+    # This drops exact duplicates across all columns (including ID if present)
+    # If ID is always unique, duplicates will not be removed, which is expected
     df_clean = df_clean.drop_duplicates()
-    df_clean = df_clean.dropna()
 
-    # 4) Reset index to prevent downstream alignment bugs
-    df_clean = df_clean.reset_index(drop=True)
-
-    # MLOps Observability: Log data loss and final state
-    dropped_rows = initial_rows - len(df_clean)
-    if dropped_rows > 0:
-        # TODO: replace with logging later
-        print(
-            f"[clean_data.clean_dataframe] Dropped {dropped_rows} rows due to NA or duplicates")
-    # TODO: replace with logging later
-    print(f"[clean_data.clean_dataframe] Rows after cleaning: {len(df_clean)}")
-
-    # Fail fast: pipeline cannot train without a target column
-    if target_column not in df_clean.columns:
-        raise ValueError(
-            f"Fatal: target column '{target_column}' missing after cleaning. "
-            "Check TARGET_COLUMN in src/main.py and your raw CSV headers"
+    if target_column is not None:
+        # Standardize target name to match standardized headers
+        target_column_std = (
+            (target_column or "")
+            .strip()
+            .replace(" ", "_")
         )
 
+        if not target_column_std:
+            raise ValueError("target_column is empty after standardization")
+
+        # Be forgiving to case drift in student datasets
+        cols_lower = {c.lower(): c for c in df_clean.columns}
+        if target_column_std not in df_clean.columns:
+            if target_column_std.lower() in cols_lower:
+                target_column_std = cols_lower[target_column_std.lower()]
+            else:
+                raise ValueError(
+                    f"Fatal: target column '{target_column}' missing after cleaning. "
+                    "Check SETTINGS['target_column'] in src/main.py and your raw CSV headers"
+                )
+
+        # Supervised learning requires a target label for every training row
+        df_clean = df_clean.dropna(subset=[target_column_std])
+
+    df_clean = df_clean.reset_index(drop=True)
+
+    dropped_rows = initial_rows - len(df_clean)
+    if dropped_rows > 0:
+        # TODO
+        print(f"[clean_data.clean_dataframe] Dropped {dropped_rows} rows")
+
+    # TODO
+    print(f"[clean_data.clean_dataframe] Rows after cleaning: {len(df_clean)}")
     return df_clean

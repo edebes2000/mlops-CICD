@@ -3,7 +3,7 @@
 Educational Goal:
 - Why this module exists in an MLOps system: Orchestrate the pipeline in a readable entry point
 - Responsibility (separation of concerns): Coordinate steps, handle splits, inject configuration, and delegate work to modules
-- Pipeline contract (inputs and outputs): Produces a cleaned dataset and a trained pipeline artifact saved to disk
+- Pipeline contract (inputs and outputs): Produces a cleaned dataset, a trained pipeline artifact, and an inference predictions artifact
 
 TODO: Replace print statements with standard library logging in a later session
 TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
@@ -31,8 +31,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RAW_DATA_PATH = PROJECT_ROOT / "data" / "raw" / "opiod_raw_data.csv"
 CLEAN_DATA_PATH = PROJECT_ROOT / "data" / "processed" / "clean.csv"
 MODEL_PATH = PROJECT_ROOT / "models" / "model.joblib"
-PREDICTIONS_PATH = PROJECT_ROOT / "reports" / \
-    "predictions.csv"  # New: Persist inference outputs
+INFERENCE_DATA_PATH = PROJECT_ROOT / "data" / "inference" / "opioid_infer_01.csv"
+PREDICTIONS_PATH = PROJECT_ROOT / "reports" / "predictions.csv"
 
 BINARY_SUM_COLS = [
     "A", "B", "C", "D", "E", "F",
@@ -45,7 +45,6 @@ SETTINGS = {
     "is_example_config": False,
     "target_column": "OD",
     "problem_type": "classification",
-    # 3 way split: train, validation, test
     "split": {"test_size": 0.05, "val_size": 0.15, "random_state": 42},
     "features": {
         "quantile_bin": ["rx_ds"],
@@ -70,17 +69,7 @@ def _three_way_split(
     stratify: bool,
 ):
     """
-    Inputs:
-    - X: Feature table
-    - y: Target vector
-    - test_size: Fraction reserved for the final test vault
-    - val_size: Fraction reserved for validation during development
-    - random_state: Reproducible split seed
-    - stratify: If True, preserve class ratios in each split
-    Outputs:
-    - X_train, X_val, X_test, y_train, y_val, y_test
-
-    Why this contract matters for reliable ML delivery:
+    Why this contract matters for reliable ML delivery
     - Train learns, validation guides decisions, test audits the final result
     """
     if test_size <= 0 or val_size <= 0 or (test_size + val_size) >= 1.0:
@@ -91,7 +80,6 @@ def _three_way_split(
     stratify_y = y if stratify else None
 
     try:
-        # A) carve out test first
         X_temp, X_test, y_temp, y_test = train_test_split(
             X,
             y,
@@ -100,7 +88,6 @@ def _three_way_split(
             stratify=stratify_y,
         )
 
-        # B) split remaining into train and validation
         relative_val_size = val_size / (1.0 - test_size)
         stratify_temp = y_temp if stratify else None
 
@@ -124,6 +111,7 @@ def _three_way_split(
             test_size=test_size,
             random_state=random_state,
         )
+
         relative_val_size = val_size / (1.0 - test_size)
         X_train, X_val, y_train, y_val = train_test_split(
             X_temp,
@@ -133,6 +121,16 @@ def _three_way_split(
         )
 
         return X_train, X_val, X_test, y_train, y_val, y_test
+
+
+def _get_feature_columns_from_settings() -> list[str]:
+    cols = (
+        SETTINGS["features"]["quantile_bin"]
+        + SETTINGS["features"]["categorical_onehot"]
+        + SETTINGS["features"]["numeric_passthrough"]
+        + SETTINGS["features"]["binary_sum_cols"]
+    )
+    return list(dict.fromkeys(cols))
 
 
 def main():
@@ -147,30 +145,22 @@ def main():
     print("[main.main] 1) LOAD")
     df_raw = load_raw_data(RAW_DATA_PATH)
 
-    # 2) CLEAN
-    print("[main.main] 2) CLEAN")
+    # 2) CLEAN (training mode, target required)
+    print("[main.main] 2) CLEAN (TRAINING DATA)")
     df_clean = clean_dataframe(df_raw, target_column=SETTINGS["target_column"])
 
     # 3) SAVE PROCESSED CSV
     print("[main.main] 3) SAVE PROCESSED CSV")
     save_csv(df_clean, CLEAN_DATA_PATH)
 
-    # 4) VALIDATE
-    print("[main.main] 4) VALIDATE")
-    required_columns = (
-        [SETTINGS["target_column"]]
-        + SETTINGS["features"]["quantile_bin"]
-        + SETTINGS["features"]["categorical_onehot"]
-        + SETTINGS["features"]["numeric_passthrough"]
-        + SETTINGS["features"]["binary_sum_cols"]
-    )
-    # Deduplicate required columns to prevent accidental duplicate checks
-    required_columns = list(dict.fromkeys(required_columns))
+    # 4) VALIDATE (training mode)
+    print("[main.main] 4) VALIDATE (TRAINING DATA)")
+    required_columns = [SETTINGS["target_column"]] + \
+        _get_feature_columns_from_settings()
 
     validate_dataframe(
         df=df_clean,
         required_columns=required_columns,
-        # <--- FIXED: Must be False so features.py imputers can work!
         check_missing_values=False,
         target_column=SETTINGS["target_column"],
         target_allowed_values=[
@@ -180,11 +170,17 @@ def main():
 
     # 5) SPLIT
     print("[main.main] 5) SPLIT INTO TRAIN, VALIDATION, TEST")
-    X = df_clean.drop(columns=[SETTINGS["target_column"]])
+    X_full = df_clean.drop(columns=[SETTINGS["target_column"]])
     y = df_clean[SETTINGS["target_column"]]
 
+    identifier_col = "ID" if "ID" in X_full.columns else None
+    if identifier_col:
+        X_full_no_id = X_full.drop(columns=[identifier_col])
+    else:
+        X_full_no_id = X_full
+
     X_train, X_val, X_test, y_train, y_val, y_test = _three_way_split(
-        X,
+        X_full_no_id,
         y,
         test_size=SETTINGS["split"]["test_size"],
         val_size=SETTINGS["split"]["val_size"],
@@ -196,18 +192,12 @@ def main():
     print("Train:", X_train.shape, "Validation:",
           X_val.shape, "Test:", X_test.shape)
 
-    # Fail fast if the test vault is unexpectedly empty
     if len(X_test) == 0:
         raise ValueError(
             "Fatal: test split is empty. Check split ratios and dataset size.")
 
     # 6) FAIL FAST FEATURE CHECKS
-    configured_cols = (
-        SETTINGS["features"]["quantile_bin"]
-        + SETTINGS["features"]["categorical_onehot"]
-        + SETTINGS["features"]["numeric_passthrough"]
-        + SETTINGS["features"]["binary_sum_cols"]
-    )
+    configured_cols = _get_feature_columns_from_settings()
     if not configured_cols:
         raise ValueError(
             "Fatal: No feature columns configured in SETTINGS['features']")
@@ -256,23 +246,63 @@ def main():
     print("[main.main] 9) SAVE MODEL")
     save_model(model_pipeline, MODEL_PATH)
 
-    # 10) INFERENCE DEMO
-    print("[main.main] 10) INFERENCE DEMO (SAMPLED FROM TEST)")
-    sample_n = min(10, len(X_test))  # Robust sampling
-    X_infer_sample = X_test.sample(
-        n=sample_n, random_state=SETTINGS["split"]["random_state"])
+    # 10) INFERENCE (NEW DATA FILE)
+    print("[main.main] 10) INFERENCE (NEW DATA FILE)")
 
+    if not INFERENCE_DATA_PATH.exists():
+        raise FileNotFoundError(
+            f"Inference file not found at {INFERENCE_DATA_PATH}. "
+            "Place a file like opioid_infer_01.csv under data/inference"
+        )
+
+    # Load new unseen data
+    df_infer_raw = load_raw_data(INFERENCE_DATA_PATH)
+
+    # Clean in inference mode (no target required)
+    df_infer_clean = clean_dataframe(df_infer_raw, target_column=None)
+
+    # Validate feature contract only
+    infer_required_columns = (
+        SETTINGS["features"]["quantile_bin"]
+        + SETTINGS["features"]["categorical_onehot"]
+        + SETTINGS["features"]["numeric_passthrough"]
+        + SETTINGS["features"]["binary_sum_cols"]
+    )
+    infer_required_columns = list(dict.fromkeys(infer_required_columns))
+
+    validate_dataframe(
+        df=df_infer_clean,
+        required_columns=infer_required_columns,
+        check_missing_values=False,
+        target_column=None,
+        target_allowed_values=None,
+        numeric_non_negative_cols=SETTINGS["validation"]["numeric_non_negative_cols"],
+    )
+
+    # Keep ID for traceability but never send it into the model
+    identifier_col = "ID" if "ID" in df_infer_clean.columns else None
+    X_infer = df_infer_clean.drop(
+        columns=[identifier_col]) if identifier_col else df_infer_clean
+
+    # Run inference through the trained pipeline artifact
     df_predictions = run_inference(
         model=model_pipeline,
-        X_infer=X_infer_sample,
+        X_infer=X_infer,
         include_proba=(SETTINGS["problem_type"] == "classification"),
     )
+
+    # Re-attach ID for audit joins
+    if identifier_col:
+        df_predictions.insert(
+            0, identifier_col, df_infer_clean[identifier_col].values)
 
     print("[main.main] Inference results")
     print(df_predictions.head(10))
 
-    # Persist inference output as an audit artifact
+    # Persist predictions as artifact
     save_csv(df_predictions, PREDICTIONS_PATH)
+
+    print(f"[main.main] Wrote predictions artifact to {PREDICTIONS_PATH}")
 
     print("[main.main] Done")
     print(f"[main.main] Wrote {CLEAN_DATA_PATH}")
