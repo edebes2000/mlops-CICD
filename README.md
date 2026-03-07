@@ -1,8 +1,11 @@
-# Opioid Use Disorder (OUD) Risk Prediction
+# Opioid Use Disorder (OUD) Risk Prediction Pipeline
 
-**Author:** MLOps Instructor (Ivan Diaz)
+![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)
+![MLOps Standard](https://img.shields.io/badge/MLOps-Modular-success)
+
+**Author:** MLOps Instructor (Ivan Diaz)  
 **Course:** MLOps: Master in Business Analytics and Data Science  
-**Status:** Production-Ready (Modularized Pipeline)
+**Status:** Production-Ready (Modularized Pipeline Phase 0.5)
 
 ---
 
@@ -17,7 +20,20 @@ Healthcare systems and insurers currently rely on lagging indicators (e.g., over
 
 ---
 
-## 2. Success Metrics
+## 2. ML Pipeline Architecture
+
+This repository transitions from a fragile Jupyter Notebook into a testable software engineering architecture. The pipeline enforces strict **Separation of Concerns** to prevent data leakage and ensure reproducibility.
+
+* **1. Ingestion (`load_data.py`):** Deterministic raw data loading.
+* **2. Preprocessing (`clean_data.py`):** Stateless formatting and NA handling.
+* **3. Quality Gates (`validate.py`):** "Fail-fast" schema and domain boundary checks.
+* **4. Feature Engineering (`features.py`):** Unfitted `ColumnTransformer` recipes.
+* **5. Training & Artifacts (`train.py`):** Bundling features and algorithms into a single deployable `.joblib` Pipeline.
+* **6. Evaluation & Inference (`evaluate.py`, `infer.py`):** Isolated metric computation and probability generation.
+
+---
+
+## 3. Success Metrics & Fairness
 
 * **Business KPI:** Increase the early-intervention outreach yield, reducing the 12-month incidence rate of severe OUD-related emergency room admissions.
 * **Technical Metric:** **F1-Score** on the Validation set. We must balance catching true cases (Recall) without overwhelming care managers with false alarms (Precision).
@@ -25,168 +41,106 @@ Healthcare systems and insurers currently rely on lagging indicators (e.g., over
 
 ---
 
-## 3. The Data
+## 4. The Data
 
-### Source and unit of analysis
-- Synthetic, de identified claims style dataset for teaching purposes
-- Unit of analysis is an individual member record summarised over a 2 year lookback period
+**Data Sensitivity Warning:** This teaching dataset contains synthetic, de-identified claims. In real healthcare contexts, this is Protected Health Information (PHI) and must **never** be committed to public version control.
 
-### Dataset snapshot
-- Rows: 1000
-- Columns: 22 (including `ID` and target)
-- Positive class prevalence (`OD=1`): 18.1% (181 of 1000)
-- `rx_ds` range: 1 to 1699 days supplied over 2 years
+* **Snapshot:** 1000 rows, 22 columns. Unit of analysis is a member record over a 2-year lookback.
+* **Prevalence:** Positive class (`OD=1`) is 18.1%.
+* **Target (`OD`):** Opioid abuse disorder, operationalized as ICD-10 F11 related claims within 2 years.
 
-### Target definition
-- `OD`: whether someone had opioid abuse disorder, operationalised as having International Classification of Diseases, Tenth Revision (ICD-10) F11 related claims within 2 years
+<details>
+<summary><b>Click to expand Data Dictionary</b></summary>
 
-### Data sensitivity
-- This teaching dataset contains no direct personal identifiers
-- In real healthcare contexts, this type of data is sensitive and must be treated as protected health information, never committed to public version control
-
-### Data Dictionary
-> Notes  
-> `rx ds` is standardised to `rx_ds` in `clean_data.py` to keep downstream contracts stable  
+> *Note: `rx ds` is standardized to `rx_ds` during cleaning to stabilize downstream contracts.*
 
 | Feature | Description |
 |---|---|
-| OD | Opioid abuse disorder indicator based on F11 claims in 2 years |
-| Low_inc | Low income flag, 1 means low income |
+| OD | Target: Opioid abuse disorder indicator (F11 claims) |
+| Low_inc | Low income flag (1 = low income) |
 | SURG | Major surgery in the last 2 years |
 | rx_ds | Days supply filled for opioid drugs over 2 years |
-| A | Infectious diseases group A ICD-10 chapter flag |
-| B | Infectious diseases group B ICD-10 chapter flag |
-| C | Malignant neoplasm flag |
-| D | Benign neoplasm flag |
-| E | Endocrine conditions flag |
-| F | Mental and behavioural health conditions excluding F11 related |
-| H | Ear conditions flag |
-| I | Circulatory system conditions flag |
-| J | Respiratory system conditions flag |
-| K | Digestive system conditions flag |
-| L | Skin conditions flag |
-| M | Musculoskeletal system conditions flag |
-| N | Urinary system conditions flag |
-| R | Other signs and symptoms flag |
-| S | Injuries flag |
-| T | Burns and toxic conditions flag |
-| V | External trauma conditions flag |
+| A - V | Various ICD-10 chapter flags (Infectious diseases, Neoplasms, etc.) |
+</details>
 
 ---
 
-## 4. Academic Purpose & ML Approach
+## 5. Getting Started (How to Run)
 
-This repository is a teaching scaffold for **Machine Learning Operations (MLOps)**. We transition from a fragile Jupyter Notebook into a testable software engineering architecture.
+### Step 1: Environment Setup
+Ensure complete dependency reproducibility by building the Conda environment:
+```bash
+conda env create -f environment.yml
+conda activate mlops-modul
+```
 
-* **Separation of Concerns:** Every step (Loading, Cleaning, Splitting, Training) has a dedicated, single-purpose Python module.
-* **Fail-Fast Security Gates:** `validate.py` blocks missing values and invalid data types before expensive compute begins.
-* **Leakage Prevention:** We split data *before* fitting feature recipes.
-* **Deployable Artifacts:** The orchestrator bundles preprocessing and the algorithm into a single `.joblib` file, preventing training-serving skew.
+### Step 2: Ensure Pipeline Quality (Testing)
+Run the unit test suite to verify mathematically sound logic and unbroken data contracts before executing heavy compute:
+```bash
+pytest -q
+```
+*(Expected output: 100% passing tests)*
 
-### Future Roadmap (Upcoming Sessions)
-* Move `SETTINGS` into `config.yaml`.
-* Replace `print()` statements with structured logging.
-* Add MLflow for experiment tracking and model registry.
-* Containerize and serve predictions via a FastAPI application.
+### Step 3: Execute the Orchestrator
+The orchestrator (`src/main.py`) is the automated "factory". It provides deterministic execution and is the *only* entry point authorized to write canonical production artifacts to your hard drive.
+```bash
+python -m src.main
+```
+
+**Outputs Generated:**
+1. `data/processed/clean.csv`: Deterministically cleaned input data.
+2. `models/model.joblib`: Deployable Pipeline artifact (preventing training-serving skew).
+3. `reports/predictions.csv`: Inference log containing predictions and probabilities.
+
+### Optional: Exploratory Sandbox
+Before running the automated pipeline, interactively explore data using the provided notebooks (`notebooks/`). These run entirely in memory and do not corrupt production artifacts.
+```bash
+jupyter notebook notebooks/01_opioid_analysis_vExp.ipynb
+```
 
 ---
 
-## 5. Repository Structure
+## 6. Repository Structure
 
 ```text
 .
-├── LICENSE
-├── README.md
-├── config.yaml
-├── data
-│   ├── inference
-│   ├── processed
-│   │   └── clean.csv
-│   └── raw
-│       └── opiod_raw_data.csv
-├── environment.yml
-├── models
-│   └── model.joblib
-├── notebooks
-│   ├── 00_opioid_analysis_vLegacy.ipynb
-│   ├── 01_opioid_analysis_vExp.ipynb
-│   └── exmpak.py
-├── pytest.ini
-├── reports
-│   └── predictions.csv
-├── src
-│   ├── __init__.py
+├── config.yaml               # Centralized configuration (hyperparameters, paths)
+├── environment.yml           # Conda dependency manager
+├── pytest.ini                # Pytest configuration
+├── data/
+│   ├── raw/                  # Immutable source data
+│   └── processed/            # Cleaned data for training/inference
+├── models/                   # Serialized model artifacts (.joblib)
+├── notebooks/                # Exploratory Data Analysis (EDA) sandboxes
+├── reports/                  # Generated predictions, metrics, and logs
+├── src/                      # Core MLOps Python modules
 │   ├── clean_data.py
 │   ├── evaluate.py
 │   ├── features.py
 │   ├── infer.py
 │   ├── load_data.py
-│   ├── main.py
+│   ├── main.py               # Pipeline orchestrator
 │   ├── train.py
 │   ├── utils.py
 │   └── validate.py
-└── tests
-    ├── test_clean_data.py
-    ├── test_evaluate.py
-    ├── test_features.py
-    ├── test_infer.py
-    ├── test_load_data.py
-    ├── test_main.py
-    ├── test_train.py
-    └── test_validate.py
-```
-## 6. How to Run & Test
-
-### Step 1: Environment Setup
-Build and activate the Conda environment:
-```
-conda env create -f environment.yml
-conda activate mlops-modul
+└── tests/                    # Unit tests for CI/CD pipelines
+    └── test_*.py             # Tests matching src/ modules
 ```
 
-### Step 2: Exploratory Sandbox (The Lab Bench)
-Before running the automated pipeline, interactively explore the data and debug your custom modules using the provided Jupyter Notebook. 
+---
 
-* **The Sandbox (`notebooks/01_opioid_analysis_vExp.ipynb`):** This is the data scientist's "lab bench" for interactive inspection, rapid iteration, and viewing intermediate states. To protect the audit vault and prevent stale outputs, it runs entirely in memory and **does not** write production artifacts to disk.
-* **The Orchestrator (`src/main.py`):** This is the automated "factory". It provides deterministic, reproducible execution and is the *only* entry point authorized to write canonical production artifacts to your hard drive.
+## 7. Educational Roadmap
 
-Launch the sandbox:
-```
-jupyter notebook
-notebooks/01_opioid_analysis_vExp.ipynb
-```
+**Current Session Achievements:**
+- Translated a notebook workflow into a `src/` layout with explicit module contracts.
+- Implemented baseline testing (`pytest`) and quality gates.
+- Enforced leakage prevention by design through strict split/fit boundaries.
 
-### Step 3: Run the Test Suite
-Ensure the codebase is mathematically sound and pipeline contracts are unbroken:
-```
-python -m pytest -q
-```
-> (You should see 100% passing tests!)
-
-### Step 4: Execute the Orchestrator
-Run the end-to-end machine learning pipeline to clean data, train the model, and generate artifacts:
-```
-python -m src.main
-```
-## 7. Outputs Generated:
-1. data/processed/clean.csv: The deterministically cleaned input data
-2. models/model.joblib: The deployable pipeline artifact
-3. reports/predictions.csv: The inference log containing predictions and probabilities
-
-## 8. Academic Purpose
-
-This repository is a teaching scaffold for Machine Learning Operations (MLOps)
-
-**Learning outcomes**
-
-- Translate a notebook workflow into a src/ layout with explicit module contracts
-- Implement quality gates before training to prevent silent failure modes
-- Enforce leakage prevention by design through split and fit boundaries
-- Produce model and data artifacts for auditability and reproducibility
-- Add tests that validate behaviour, not just that code runs
-
-**Roadmap for later sessions**
-- Move SETTINGS into config.yaml and add environment based secrets via .env
-- Replace prints with standard library logging and structured logs
-- Add experiment tracking, model registry, and continuous integration
-- Containerise and serve predictions via an application programming interface, FastAPI
+**Upcoming Sessions:**
+- Fully migrate hardcoded `SETTINGS` into `config.yaml` and use `.env` for secrets.
+- Replace `print()` statements with standard library structured **logging**.
+- Add **Weights & Biases (W&B)** for experiment tracking and model registry.
+- Containerize the environment using **Docker** and serve predictions via a **FastAPI** application.
+- Implement Continuous Integration (CI) quality checks using **GitHub Actions**.
+- Deploy the live service to **Render**
+- Implement data version control with **DVC**
