@@ -64,7 +64,6 @@ def require_section(cfg: Dict[str, Any], section: str) -> Dict[str, Any]:
     Enforce a required top-level config section.
 
     Why this exists
-    - KeyError messages are unhelpful for students
     - This produces an actionable error tied to config.yaml structure
     """
     value = cfg.get(section)
