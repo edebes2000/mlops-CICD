@@ -1,4 +1,3 @@
-```python
 # src/main.py
 """
 Educational goal
