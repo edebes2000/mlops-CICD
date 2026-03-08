@@ -16,4 +16,5 @@ dependencies:
   - ipykernel
   - pytest
   - pytest-cov
+  - pyyaml
   - pip

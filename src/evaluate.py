@@ -9,11 +9,13 @@ TODO: Replace print statements with standard library logging in a later session
 TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
 """
 
+import logging
 from typing import Dict, Optional
 import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, mean_squared_error, roc_auc_score
 
+logger = logging.getLogger(__name__)
 
 def _normalize_problem_type(problem_type: Optional[str]) -> str:
     """
@@ -44,7 +46,7 @@ def evaluate_model(model, X_eval: pd.DataFrame, y_eval: pd.Series, problem_type:
     - Standardized metric keys enable automated quality gates later in continuous integration pipelines
     - Returning JSON safe floats prevents serialization issues in experiment tracking tools
     """
-    print("[evaluate.evaluate_model] Starting evaluation")  # TODO: replace with logging later
+    logger.info("Starting evaluation")
 
     if X_eval is None or len(X_eval) == 0:
         raise ValueError("Fatal: X_eval is empty. Cannot evaluate model")
@@ -94,15 +96,13 @@ def evaluate_model(model, X_eval: pd.DataFrame, y_eval: pd.Series, problem_type:
             "pr_auc": float(average_precision_score(y_eval, y_prob)),
             "roc_auc": float(roc_auc_score(y_eval, y_prob)),
         }
-        # TODO: replace with logging later
-        print(f"[evaluate.evaluate_model] Metrics={metrics}")
+        logger.info(f"Metrics={metrics}")
         return metrics
 
     if pt == "regression":
         y_pred = model.predict(X_eval)
         metrics = {"rmse": float(np.sqrt(mean_squared_error(y_eval, y_pred)))}
-        # TODO: replace with logging later
-        print(f"[evaluate.evaluate_model] Metrics={metrics}")
+        logger.info(f"Metrics={metrics}")
         return metrics
 
     raise ValueError(

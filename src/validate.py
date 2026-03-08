@@ -1,4 +1,8 @@
 # src/validate.py
+import logging
+from typing import Any, List, Optional
+import pandas as pd
+
 """
 Educational Goal:
 - Why this module exists in an MLOps system: Fail fast on obvious data issues before expensive steps run
@@ -9,9 +13,7 @@ TODO: Replace print statements with standard library logging in a later session
 TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
 """
 
-from typing import Any, List, Optional
-import pandas as pd
-
+logger = logging.getLogger(__name__)
 
 def validate_dataframe(
     df: pd.DataFrame,
@@ -37,7 +39,7 @@ def validate_dataframe(
     - Validation catches schema drift and bad data early, before training wastes time or produces silent failures
     - Target integrity is non negotiable for supervised learning, missing target must always fail fast
     """
-    print("[validate.validate_dataframe] Validating dataframe")  # TODO: replace with logging later
+    logger.info("Validating dataframe")
 
     if df is None:
         raise ValueError(
@@ -88,27 +90,4 @@ def validate_dataframe(
                 f"Validation failed: target column '{target_column}' contains missing values")
 
         if target_allowed_values is not None:
-            actual_values = set(df[target_column].dropna().unique().tolist())
-            allowed_values = set(target_allowed_values)
-            if not actual_values.issubset(allowed_values):
-                raise ValueError(
-                    f"Validation failed: Target '{target_column}' has invalid values {sorted(actual_values)}. "
-                    f"Expected subset of {sorted(allowed_values)}"
-                )
-
-    numeric_non_negative_cols = numeric_non_negative_cols or []
-    for col in numeric_non_negative_cols:
-        if col not in df.columns:
-            raise ValueError(
-                f"Validation failed: numeric_non_negative_cols includes missing column '{col}'")
-
-        if not pd.api.types.is_numeric_dtype(df[col]):
-            raise TypeError(
-                f"Validation failed: Column '{col}' is in numeric_non_negative_cols but is not numeric"
-            )
-
-        if (df[col] < 0).any():
-            raise ValueError(
-                f"Validation failed: Column '{col}' contains negative values")
-
-    return True
+            actual_values = set(
