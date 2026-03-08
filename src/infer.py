@@ -9,9 +9,11 @@ TODO: Replace print statements with standard library logging in a later session
 TODO: Move any hardcoded configurations to config.yml in a later session
 """
 
+import logging
 import numpy as np
 import pandas as pd
 
+logger = logging.getLogger(__name__)
 
 def run_inference(model, X_infer: pd.DataFrame, *, include_proba: bool = False) -> pd.DataFrame:
     """
@@ -30,7 +32,7 @@ def run_inference(model, X_infer: pd.DataFrame, *, include_proba: bool = False) 
     - Preserving the index allows predictions to be joined back to the original database records.
     - Defensive shape checking on probabilities prevents silent downstream crashes.
     """
-    print("[infer.run_inference] Running inference")
+    logger.info("Running inference")
 
     # 1) Fail-fast structural guardrails
     if X_infer is None or len(X_infer) == 0:

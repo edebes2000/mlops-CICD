@@ -1,4 +1,5 @@
 # src/clean_data.py
+import logging
 from typing import Optional
 import pandas as pd
 
@@ -11,6 +12,8 @@ Educational Goal:
 TODO: Replace print statements with standard library logging in a later session
 TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
 """
+
+logger = logging.getLogger(__name__)
 
 def clean_dataframe(df_raw: pd.DataFrame, target_column: Optional[str] = None) -> pd.DataFrame:
     """
@@ -26,7 +29,7 @@ def clean_dataframe(df_raw: pd.DataFrame, target_column: Optional[str] = None) -
     - Drop exact duplicates
     - Do not require or drop based on target
     """
-    print("[clean_data.clean_dataframe] Cleaning dataframe")  # TODO: replace with logging later
+    logger.info("Cleaning dataframe")
 
     if df_raw is None:
         raise ValueError(
@@ -81,9 +84,7 @@ def clean_dataframe(df_raw: pd.DataFrame, target_column: Optional[str] = None) -
 
     dropped_rows = initial_rows - len(df_clean)
     if dropped_rows > 0:
-        # TODO
-        print(f"[clean_data.clean_dataframe] Dropped {dropped_rows} rows")
+        logger.info(f"Dropped {dropped_rows} rows")
 
-    # TODO
-    print(f"[clean_data.clean_dataframe] Rows after cleaning: {len(df_clean)}")
+    logger.info(f"Rows after cleaning: {len(df_clean)}")
     return df_clean

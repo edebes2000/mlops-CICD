@@ -3,15 +3,15 @@
 # Secrets belong in .env only NOT HERE! (example: WANDB_API_KEY)
 
 paths:
-  raw_data: "data/raw/opiod_raw_data.csv"
+  raw_data: "data/raw/opioid_raw_data.csv"
   processed_data: "data/processed/clean.csv"
   model_artifact: "models/model.joblib"
   inference_data: "data/inference/opioid_infer_01.csv"
   predictions_artifact: "reports/predictions.csv"
+  log_file: "logs/pipeline.log"
 
 logging:
-  level: "INFO"      # "DEBUG", "INFO", "WARNING", "ERROR"
-  format: "text"     # keep "text" for class, can add "json" later
+  level: "INFO"                  # "DEBUG", "INFO", "WARNING", "ERROR"
 
 problem:
   target_column: "OD"

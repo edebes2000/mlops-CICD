@@ -8,10 +8,12 @@ Educational Goal:
 TODO: Replace print statements with standard library logging in a later session
 """
 
+import logging
 from pathlib import Path
 import pandas as pd
 import joblib
 
+logger = logging.getLogger(__name__)
 
 def load_csv(filepath: Path) -> pd.DataFrame:
     """
@@ -22,9 +24,7 @@ def load_csv(filepath: Path) -> pd.DataFrame:
     Why this contract matters for reliable ML delivery:
     - Standardized parsing reduces fragile one-off fixes and improves reproducibility
     """
-    print(
-        # TODO: replace with logging later
-        f"[utils.load_csv] Loading CSV from {filepath}")
+    logger.info(f"Loading CSV from {filepath}")
 
     if not isinstance(filepath, Path):
         raise TypeError(
@@ -56,9 +56,7 @@ def save_csv(df: pd.DataFrame, filepath: Path) -> None:
     Why this contract matters for reliable ML delivery:
     - Deterministic saving (index=False) prevents alignment bugs downstream
     """
-    print(
-        # TODO: replace with logging later
-        f"[utils.save_csv] Saving CSV to {filepath}")
+    logger.info(f"Saving CSV to {filepath}")
 
     filepath.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(filepath, index=False)
@@ -74,9 +72,7 @@ def save_model(model, filepath: Path) -> None:
     Why this contract matters for reliable ML delivery:
     - Persisted artifacts enable reproducible inference and auditability
     """
-    print(
-        # TODO: replace with logging later
-        f"[utils.save_model] Saving model to {filepath}")
+    logger.info(f"Saving model to {filepath}")
 
     filepath.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, filepath)
@@ -91,9 +87,7 @@ def load_model(filepath: Path):
     Why this contract matters for reliable ML delivery:
     - Fail fast on missing artifacts prevents cryptic inference crashes
     """
-    print(
-        # TODO: replace with logging later
-        f"[utils.load_model] Loading model from {filepath}")
+    logger.info(f"Loading model from {filepath}")
 
     if not filepath.exists():
         raise FileNotFoundError(

@@ -11,6 +11,7 @@ Design choices for simplicity
 - Keep scikit-learn Pipeline as the core artifact
 """
 
+import logging
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -18,6 +19,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.pipeline import Pipeline
 
+logger = logging.getLogger(__name__)
 
 def _normalize_problem_type(problem_type: Optional[str]) -> str:
     return (problem_type or "").strip().lower()
@@ -43,7 +45,7 @@ def train_model(
     Output
     - A fitted scikit-learn Pipeline artifact
     """
-    print(f"[train] Training model pipeline for problem_type={problem_type}")
+    logger.info(f"Training model pipeline for problem_type={problem_type}")
 
     if X_train is None or len(X_train) == 0:
         raise ValueError("X_train is empty. Cannot train a model")

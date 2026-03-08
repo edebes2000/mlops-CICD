@@ -9,11 +9,13 @@ TODO: Replace print statements with standard library logging in a later session
 TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
 """
 
+import logging
 from pathlib import Path
 import pandas as pd
 
 from src.utils import load_csv
 
+logger = logging.getLogger(__name__)
 
 def load_raw_data(raw_data_path: Path) -> pd.DataFrame:
     """
@@ -24,9 +26,7 @@ def load_raw_data(raw_data_path: Path) -> pd.DataFrame:
     Why this contract matters for reliable ML delivery:
     - A stable ingestion interface prevents downstream rewiring when data sources evolve
     """
-    print(
-        # TODO: replace with logging later
-        f"[load_data.load_raw_data] Loading raw data from {raw_data_path}")
+    logger.info(f"Loading raw data from {raw_data_path}")
 
     # 1) Pipeline Guardrail: Missing Data Dependency
     if not raw_data_path.exists():
@@ -53,7 +53,6 @@ def load_raw_data(raw_data_path: Path) -> pd.DataFrame:
         )
 
     # 5) Observability
-    # TODO: replace with logging later
-    print(f"[load_data.load_raw_data] Loaded dataframe shape: {df_raw.shape}")
+    logger.info(f"Loaded dataframe shape: {df_raw.shape}")
 
     return df_raw
