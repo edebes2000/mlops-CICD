@@ -143,5 +143,5 @@ jupyter notebook notebooks/01_opioid_analysis_vExp.ipynb
 - Use **W&B artifacts and model registry** to register and retrieve a pinned model version for reproducible inference
 - Serve predictions via a **FastAPI** application with a clear request and response contract and a `/health` endpoint
 - Containerize the inference service with **Docker** and validate it runs locally end to end
-- Implement Continuous Integration (CI) quality checks using **GitHub Actions**
+- Implement Continuous Integration (CI/CD) quality checks using **GitHub Actions**
 - Deploy the live service to **Render** with automated deploys
