@@ -137,8 +137,6 @@ jupyter notebook notebooks/01_opioid_analysis_vExp.ipynb
 - Enforced leakage prevention by design through strict split/fit boundaries.
 
 **Upcoming Sessions:**
-## Upcoming milestones
-
 - Migrate all hardcoded `SETTINGS` into `config.yaml` and use `.env` for secrets
 - Replace `print()` statements with Python standard library **logging** (consistent, structured, reusable across modules)
 - Add **Weights & Biases (W&B)** for experiment tracking, including basic data fingerprinting for provenance
