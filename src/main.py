@@ -22,11 +22,15 @@ What this module does not own
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import logging
+
 import pandas as pd
 import yaml
+from dotenv import load_dotenv
 from sklearn.model_selection import train_test_split
 
-import logging
+import wandb
+
 from src.logger import configure_logging
 
 from src.clean_data import clean_dataframe
@@ -45,7 +49,7 @@ logger = logging.getLogger(__name__)
 # -----------------------------
 def load_config(config_path: Path) -> Dict[str, Any]:
     """
-    Load YAML configuration from disk.
+    Load YAML configuration from disk
 
     Why this exists
     - Centralizing config loading prevents "config drift" where different modules parse YAML differently
@@ -65,7 +69,7 @@ def load_config(config_path: Path) -> Dict[str, Any]:
 
 def require_section(cfg: Dict[str, Any], section: str) -> Dict[str, Any]:
     """
-    Enforce a required top-level config section.
+    Enforce a required top-level config section
 
     Why this exists
     - This produces an actionable error tied to config.yaml structure
@@ -118,9 +122,9 @@ def normalize_problem_type(problem_type: Optional[str]) -> str:
 
 def resolve_repo_path(project_root: Path, relative_path: str) -> Path:
     """
-    Resolve a config path relative to the repo root.
+    Resolve a config path relative to the repo root
 
-    This makes the repo reproducible across machines because we never rely on the current working directory.
+    This makes the repo reproducible across machines because we never rely on the current working directory
     """
     if not isinstance(relative_path, str) or not relative_path.strip():
         raise ValueError("config.yaml: path values must be non-empty strings")
@@ -144,7 +148,7 @@ def three_way_split(
     stratify: bool,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
     """
-    Split into train, validation, test.
+    Split into train, validation, test
 
     Why it matters
     - Train is for learning
@@ -183,11 +187,38 @@ def three_way_split(
         return X_train, X_val, X_test, y_train, y_val, y_test
 
 
+def _wandb_is_enabled(cfg: Dict[str, Any]) -> bool:
+    wandb_cfg = cfg.get("wandb")
+    if not isinstance(wandb_cfg, dict):
+        return False
+    return bool(wandb_cfg.get("enabled", False))
+
+
+def _wandb_get_str(cfg: Dict[str, Any], key: str, default: str = "") -> str:
+    wandb_cfg = cfg.get("wandb")
+    if not isinstance(wandb_cfg, dict):
+        return default
+    value = wandb_cfg.get(key, default)
+    return str(value).strip() if value is not None else default
+
+
+def _wandb_get_bool(cfg: Dict[str, Any], key: str, default: bool = False) -> bool:
+    wandb_cfg = cfg.get("wandb")
+    if not isinstance(wandb_cfg, dict):
+        return default
+    value = wandb_cfg.get(key, default)
+    return bool(value)
+
+
 def main() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+
+    # Load .env explicitly from repo root to avoid ambiguity
+    load_dotenv(dotenv_path=project_root / ".env", override=False)
+
     # -----------------------------
     # Load and validate config.yaml
     # -----------------------------
-    project_root = Path(__file__).resolve().parents[1]
     cfg = load_config(project_root / "config.yaml")
 
     paths_cfg = require_section(cfg, "paths")
@@ -206,6 +237,22 @@ def main() -> None:
         log_level=log_level,
         log_file=log_file_path,
     )
+
+    # Initialize W&B run if enabled in config
+    wandb_run = None
+    if _wandb_is_enabled(cfg):
+        wandb_project = _wandb_get_str(cfg, "project")
+        if not wandb_project:
+            raise ValueError("config.yaml: wandb.project must be a non-empty string when wandb.enabled is true")
+        
+        wandb_run = wandb.init(
+            project=wandb_project,
+            config=cfg,
+            job_type="factory-pipeline",
+        )
+        logger.info("Initialized W&B run | name=%s | project=%s", wandb_run.name, wandb_project)
+    else:
+        logger.info("W&B disabled, continuing without experiment tracking")
 
     try:
         logger.info("Starting pipeline")
@@ -262,11 +309,27 @@ def main() -> None:
         logger.info("1) LOAD raw data")
         df_raw = load_raw_data(raw_data_path)
 
+        if wandb_run is not None:
+            wandb.log(
+                {
+                    "data/raw_rows": int(df_raw.shape[0]),
+                    "data/raw_cols": int(df_raw.shape[1]),
+                }
+            )
+
         # -----------------------------
         # 2) Clean training data
         # -----------------------------
         logger.info("2) CLEAN training data")
         df_clean = clean_dataframe(df_raw, target_column=target_column)
+
+        if wandb_run is not None:
+            wandb.log(
+                {
+                    "data/clean_rows": int(df_clean.shape[0]),
+                    "data/clean_cols": int(df_clean.shape[1]),
+                }
+            )
 
         # -----------------------------
         # 3) Save processed data
@@ -318,7 +381,9 @@ def main() -> None:
 
         for col in quantile_bin_cols:
             if not pd.api.types.is_numeric_dtype(X_train[col]):
-                raise ValueError(f"Column '{col}' must be numeric for quantile binning. Found dtype={X_train[col].dtype}")
+                raise ValueError(
+                    f"Column '{col}' must be numeric for quantile binning. Found dtype={X_train[col].dtype}"
+                )
 
         # -----------------------------
         # 6) Build feature preprocessor
@@ -356,11 +421,33 @@ def main() -> None:
         )
         logger.info("Validation metrics: %s", val_metrics)
 
+        if wandb_run is not None:
+            wandb.log({f"metrics/val/{k}": float(v) for k, v in val_metrics.items()})
+
         # -----------------------------
         # 9) Save model artifact
         # -----------------------------
         logger.info("9) SAVE model artifact")
         save_model(model_pipeline, model_artifact_path)
+
+        if wandb_run is not None:
+            model_artifact_name = _wandb_get_str(cfg, "model_artifact_name", default="model")
+            model_artifact = wandb.Artifact(
+                name=model_artifact_name,
+                type="model",
+                description="Scikit-learn pipeline (preprocessing + estimator)",
+            )
+            model_artifact.add_file(str(model_artifact_path))
+            wandb.log_artifact(model_artifact)
+
+            if _wandb_get_bool(cfg, "log_processed_data", default=False):
+                data_artifact = wandb.Artifact(
+                    name=f"{model_artifact_name}-processed-data",
+                    type="dataset",
+                    description="Processed training dataset written by the factory pipeline",
+                )
+                data_artifact.add_file(str(processed_data_path))
+                wandb.log_artifact(data_artifact)
 
         # -----------------------------
         # 10) Inference on new data
@@ -396,6 +483,16 @@ def main() -> None:
 
         save_csv(df_predictions, predictions_artifact_path)
 
+        if wandb_run is not None and _wandb_get_bool(cfg, "log_predictions", default=False):
+            model_artifact_name = _wandb_get_str(cfg, "model_artifact_name", default="model")
+            pred_artifact = wandb.Artifact(
+                name=f"{model_artifact_name}-predictions",
+                type="predictions",
+                description="Inference outputs written by the factory pipeline",
+            )
+            pred_artifact.add_file(str(predictions_artifact_path))
+            wandb.log_artifact(pred_artifact)
+
         logger.info("Done")
         logger.info("Wrote processed data: %s", processed_data_path)
         logger.info("Wrote model artifact: %s", model_artifact_path)
@@ -403,7 +500,13 @@ def main() -> None:
 
     except Exception:
         logger.exception("Pipeline failed")
+        if wandb_run is not None:
+            wandb.finish(exit_code=1)
         raise
+
+    finally:
+        if wandb_run is not None and wandb.run is not None:
+            wandb.finish()
 
 
 if __name__ == "__main__":

@@ -68,3 +68,9 @@ run:
   include_proba_if_classification: true
   overwrite_outputs: true
 
+wandb:
+  enabled: true
+  project: "opioid-risk-classification"
+  model_artifact_name: "opioid_classification_model"
+  log_processed_data: true
+  log_predictions: true
