@@ -1,0 +1,15 @@
+.git/
+.github/
+
+__pycache__/
+*.pyc
+
+.env
+wandb/
+logs/
+
+data/
+reports/
+
+.ipynb_checkpoints/
+.pytest_cache/

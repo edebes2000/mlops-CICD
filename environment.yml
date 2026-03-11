@@ -19,4 +19,7 @@ dependencies:
   - pyyaml
   - python-dotenv
   - wandb
+  - fastapi
+  - uvicorn
+  - pydantic
   - pip
