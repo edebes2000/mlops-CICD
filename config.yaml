@@ -68,3 +68,15 @@ run:
   include_proba_if_classification: true
   overwrite_outputs: true
 
+wandb:
+  enabled: true
+  project: "opioid-risk-classification"
+  model_artifact_name: "opioid_classification_model"
+  log_processed_data: true
+  log_predictions: true
+
+  log_auc_plots: true
+  log_confusion_matrix: true
+  log_predictions_table: true
+  predictions_table_rows: 200
+  class_names: ["No event", "Event"]

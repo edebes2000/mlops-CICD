@@ -138,6 +138,7 @@ def _make_test_config(tmp_path: Path, binary_sum_cols: List[str]) -> Dict[str, A
     model_path = tmp_path / "models" / "model.joblib"
     inference_path = tmp_path / "data" / "inference" / "opioid_infer_01.csv"
     predictions_path = tmp_path / "reports" / "predictions.csv"
+    log_file_path = tmp_path / "logs" / "pipeline.log" # <-- ADDED THIS
 
     return {
         "paths": {
@@ -147,6 +148,7 @@ def _make_test_config(tmp_path: Path, binary_sum_cols: List[str]) -> Dict[str, A
             "model_artifact": str(model_path),
             "inference_data": str(inference_path),
             "predictions_artifact": str(predictions_path),
+            "log_file": str(log_file_path), # <-- ADDED THIS
         },
         "problem": {"target_column": "OD", "problem_type": "classification", "identifier_column": "ID"},
         "split": {"test_size": 0.10, "val_size": 0.20, "random_state": 42},

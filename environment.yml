@@ -17,4 +17,6 @@ dependencies:
   - pytest
   - pytest-cov
   - pyyaml
+  - python-dotenv
+  - wandb
   - pip

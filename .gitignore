@@ -56,3 +56,6 @@ __pycache__/
 # -----------------------------
 logs/
 *.log
+
+# Weights & Biases local files
+wandb/

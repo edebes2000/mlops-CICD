@@ -90,4 +90,27 @@ def validate_dataframe(
                 f"Validation failed: target column '{target_column}' contains missing values")
 
         if target_allowed_values is not None:
-            actual_values = set(
+            actual_values = set(df[target_column].dropna().unique().tolist())
+            allowed_values = set(target_allowed_values)
+            if not actual_values.issubset(allowed_values):
+                raise ValueError(
+                    f"Validation failed: Target '{target_column}' has invalid values {sorted(actual_values)}. "
+                    f"Expected subset of {sorted(allowed_values)}"
+                )
+
+    numeric_non_negative_cols = numeric_non_negative_cols or []
+    for col in numeric_non_negative_cols:
+        if col not in df.columns:
+            raise ValueError(
+                f"Validation failed: numeric_non_negative_cols includes missing column '{col}'")
+
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            raise TypeError(
+                f"Validation failed: Column '{col}' is in numeric_non_negative_cols but is not numeric"
+            )
+
+        if (df[col] < 0).any():
+            raise ValueError(
+                f"Validation failed: Column '{col}' contains negative values")
+
+    return True
