@@ -71,6 +71,15 @@ run:
 wandb:
   enabled: true
   project: "opioid-risk-classification"
+
+  # --- NEW EXPERIMENT CONTROLS ---
+  name: "02-baseline-logistic-regression"
+  job_type: "baseline"
+  group: "session11-baselines"
+  tags: ["baseline", "logreg", "v1"]
+  notes: "Baseline logistic regression for lecture demo"
+  # -------------------------------
+
   model_artifact_name: "opioid_classification_model"
   log_processed_data: true
   log_predictions: true

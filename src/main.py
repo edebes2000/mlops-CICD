@@ -235,6 +235,26 @@ def _wandb_get_int(cfg: Dict[str, Any], key: str, default: int = 0) -> int:
         return default
 
 
+def _wandb_get_list(cfg: Dict[str, Any], key: str) -> List[str]:
+    """Safely extract a list of strings, stripping whitespace and dropping empty values."""
+    wandb_cfg = cfg.get("wandb")
+    if not isinstance(wandb_cfg, dict):
+        return []
+
+    value = wandb_cfg.get(key, [])
+    if not isinstance(value, list):
+        return []
+
+    out: List[str] = []
+    for v in value:
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            out.append(s)
+    return out
+
+
 def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
 
@@ -264,7 +284,9 @@ def main() -> None:
         log_file=log_file_path,
     )
 
-    # Initialize W&B run if enabled in config
+    # -----------------------------
+    # Initialize W&B Experiment Tracking
+    # -----------------------------
     wandb_run = None
     if _wandb_is_enabled(cfg):
         wandb_project = _wandb_get_str(cfg, "project")
@@ -272,13 +294,32 @@ def main() -> None:
             raise ValueError(
                 "config.yaml: wandb.project must be a non-empty string when wandb.enabled is true")
 
+        # Read UI controls from config
+        wandb_name = _wandb_get_str(cfg, "name")
+        wandb_job_type = _wandb_get_str(
+            cfg, "job_type", default="factory-pipeline")
+        wandb_group = _wandb_get_str(cfg, "group")
+        wandb_notes = _wandb_get_str(cfg, "notes")
+        wandb_tags = _wandb_get_list(cfg, "tags")
+
+        # Initialize W&B in one clean step
         wandb_run = wandb.init(
             project=wandb_project,
+            name=wandb_name if wandb_name else None,
+            job_type=wandb_job_type,
+            group=wandb_group if wandb_group else None,
+            notes=wandb_notes if wandb_notes else None,
+            tags=wandb_tags if wandb_tags else None,
             config=cfg,
-            job_type="factory-pipeline",
         )
-        logger.info("Initialized W&B run | name=%s | project=%s",
-                    wandb_run.name, wandb_project)
+
+        # Add minimal traceability metadata to the run summary
+        wandb_run.summary["entrypoint"] = "python -m src.main"
+        wandb_run.summary["model_artifact_path"] = str(
+            require_str(paths_cfg, "model_artifact"))
+
+        logger.info("Initialized W&B run | name=%s | project=%s | job_type=%s",
+                    wandb_run.name, wandb_project, wandb_job_type)
     else:
         logger.info("W&B disabled, continuing without experiment tracking")
 
