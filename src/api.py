@@ -1,18 +1,16 @@
 # src/api.py
 """
 Educational Goal:
-- Turn the trained ML pipeline into a minimal web product using FastAPI
-- Use Pydantic to enforce a strict data contract (types and required fields)
-- Reuse existing pipeline modules to prove modularity value and prevent training serving skew
+- Turn the trained ML pipeline into a minimal web product using FastAPI.
+- Use Pydantic to enforce a strict data contract (types and required fields).
+- Reuse existing pipeline modules to prove modularity value and prevent "Training-Serving Skew".
 
 Key principle:
-- No new ML logic in this file
-- This file only does HTTP, schema validation, and routing to existing pipeline functions
-
+- NO NEW ML LOGIC IN THIS FILE.
+- This file only does HTTP, schema validation, startup loading, and routing to existing pipeline functions.
 """
 
-from __future__ import annotations
-
+from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -27,29 +25,32 @@ from src.clean_data import clean_dataframe
 from src.infer import run_inference
 from src.validate import validate_dataframe
 
-# Keep this as the only coupling to main.py
-from src.main import load_config, require_section, require_str, resolve_repo_path  # type: ignore
+# Keep this as the only coupling to main.py to keep the API decoupled
+from src.main import load_config, require_section, require_str, resolve_repo_path
 
 
 logger = logging.getLogger("mlops.api")
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 load_dotenv()
 
 
 # -------------------------------------------------------------------
-# 1) Pydantic Schemas (strict API contract)
+# 1) Pydantic Schemas (The "Bouncer" / Strict API Contract)
 # -------------------------------------------------------------------
 class PatientRecord(BaseModel):
     """
-    This is the API contract
-    FastAPI + Pydantic will reject requests with missing fields or wrong types
+    This is the API contract. FastAPI + Pydantic will automatically reject 
+    requests with missing fields or wrong data types before they reach our ML code.
 
-    Extra fields are forbidden to avoid silently accepting junk payloads
-
+    Why `extra="forbid"`?
+    In standard web development, extra JSON fields are often ignored. 
+    In MLOps, silently accepting extra or misspelled features is dangerous 
+    and leads to silent pipeline failures. We force upstream systems to be exact.
     """
-
     model_config = ConfigDict(extra="forbid")
 
     ID: str
@@ -97,21 +98,21 @@ class HealthResponse(BaseModel):
 
 
 # -------------------------------------------------------------------
-# 2) Small local helpers (avoid relying on extra helpers in main.py)
+# 2) Small Local Helpers
 # -------------------------------------------------------------------
+# We build these helpers here instead of relying on main.py.
+# This ensures that if a student breaks main.py, the API can still stand up independently.
+
 def _require_list(cfg: Dict[str, Any], key: str) -> List[Any]:
-    """
-    Fetch a list from config or fail fast with a clean error
-
-    We keep this local to avoid assuming extra helpers exist in src.main.py
-
-    """
+    """Fetch a list from config or fail fast with a clean error."""
     if key not in cfg:
         raise ValueError(f"Missing required config key: {key}")
+
     value = cfg.get(key)
     if not isinstance(value, list):
         raise ValueError(
-            f"Config key '{key}' must be a list, got {type(value).__name__}")
+            f"Config key '{key}' must be a list, got {type(value).__name__}"
+        )
     return value
 
 
@@ -126,12 +127,7 @@ def _dedupe_preserve_order(items: List[Any]) -> List[Any]:
 
 
 def _configured_feature_columns(cfg: Dict[str, Any]) -> List[str]:
-    """
-    Build the required feature column list from config.yaml features section
-
-    This removes the need for a second required_columns list under an api section
-
-    """
+    """Build the required feature column list from config.yaml features section."""
     features_cfg = require_section(cfg, "features")
 
     quantile_bin_cols = _require_list(features_cfg, "quantile_bin")
@@ -147,123 +143,141 @@ def _configured_feature_columns(cfg: Dict[str, Any]) -> List[str]:
         + list(binary_sum_cols)
     )
 
-    # Defensive type check for teaching clarity
     cols_str: List[str] = []
     for c in cols:
         if not isinstance(c, str):
             raise ValueError(
-                f"Feature column names must be strings, got {type(c).__name__}")
+                f"Feature column names must be strings, got {type(c).__name__}"
+            )
         cols_str.append(c)
 
     return cols_str
 
 
 # -------------------------------------------------------------------
-# 3) App + global state
+# 3) Lifespan: Load shared resources once at API startup
 # -------------------------------------------------------------------
-app = FastAPI(title="Opioid Risk Predictor API", version="1.0.0")
-
-GLOBAL_CONFIG: Dict[str, Any] = {}
-MODEL_PIPELINE: Any = None
-MODEL_VERSION: str = "unloaded"
-
-
-@app.on_event("startup")
-def load_model_on_startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """
-    Load config and model exactly once when the server starts
+    Load config and model exactly once when the server starts.
 
-    We do not crash if the model is missing
-    This lets /health report the failure cleanly in demos
-
+    Why this exists (Latency & Stability)
+    - If we load the model from disk inside `/predict`, every user waits ~200ms.
+      By loading it here, it sits in RAM, and predictions take ~2ms.
+    - If the model is missing, we DO NOT crash. We log an error and set state to None.
+      This allows the `/health` endpoint to start up and tell the user exactly what is wrong.
     """
-    global GLOBAL_CONFIG, MODEL_PIPELINE, MODEL_VERSION
-
     try:
         project_root = Path(__file__).resolve().parents[1]
-        GLOBAL_CONFIG = load_config(project_root / "config.yaml")
+        app.state.global_config = load_config(project_root / "config.yaml")
 
-        paths_cfg = require_section(GLOBAL_CONFIG, "paths")
+        paths_cfg = require_section(app.state.global_config, "paths")
         model_path = resolve_repo_path(
-            project_root, require_str(paths_cfg, "model_artifact"))
+            project_root,
+            require_str(paths_cfg, "model_artifact"),
+        )
 
         if not model_path.exists():
             logger.error("Model file missing at %s", model_path)
-            MODEL_PIPELINE = None
-            MODEL_VERSION = "missing"
-            return
-
-        MODEL_PIPELINE = joblib.load(model_path)
-        MODEL_VERSION = model_path.name
-        logger.info("Startup complete, model loaded from %s", model_path)
+            app.state.model_pipeline = None
+            app.state.model_version = "missing"
+        else:
+            app.state.model_pipeline = joblib.load(model_path)
+            app.state.model_version = model_path.name
+            logger.info("Startup complete, model loaded from %s", model_path)
 
     except Exception as e:
         logger.exception("Startup failed: %s", str(e))
-        MODEL_PIPELINE = None
-        MODEL_VERSION = "startup_error"
+        app.state.global_config = {}
+        app.state.model_pipeline = None
+        app.state.model_version = "startup_error"
+
+    yield
+
+    logger.info("API shutdown complete")
+
+
+app = FastAPI(
+    title="Opioid Risk Predictor API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 
 # -------------------------------------------------------------------
 # 4) Endpoints
 # -------------------------------------------------------------------
-
 @app.get("/")
-def root():
-    return {"message": "Use /health or /docs or /predict"}
+def root() -> Dict[str, str]:
+    return {"message": "Use /health or /docs to test the API"}
 
 
 @app.get("/health", response_model=HealthResponse)
 def health_check() -> HealthResponse:
+    # Safely retrieve from app.state
+    model_loaded = getattr(app.state, "model_pipeline", None) is not None
+    model_version = getattr(app.state, "model_version", "unloaded")
+
     return HealthResponse(
-        status="ok" if MODEL_PIPELINE is not None else "model_not_loaded",
-        model_loaded=MODEL_PIPELINE is not None,
-        model_version=MODEL_VERSION,
+        status="ok" if model_loaded else "model_not_loaded",
+        model_loaded=model_loaded,
+        model_version=model_version,
     )
 
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest) -> PredictResponse:
     """
-    Core inference flow demonstrating reuse of batch pipeline logic
+    Core inference flow demonstrating reuse of batch pipeline logic.
 
-    Steps
-    - Convert validated Pydantic objects to a DataFrame
-    - Clean using clean_dataframe from Phase 1
-    - Validate using validate_dataframe from Phase 1
-    - Predict using run_inference from Phase 1
-    - Return structured response
-
+    Preventing Training-Serving Skew
+    Notice how we do NOT write new Pandas logic here. We simply pass the 
+    incoming data through the exact same functions (`clean_dataframe`, 
+    `validate_dataframe`, `run_inference`) that we used during training.
     """
-    if MODEL_PIPELINE is None:
+    model_pipeline = getattr(app.state, "model_pipeline", None)
+    global_config = getattr(app.state, "global_config", {})
+    model_version = getattr(app.state, "model_version", "unloaded")
+
+    if model_pipeline is None:
         raise HTTPException(
-            status_code=503, detail="Model is not loaded, run `python -m src.main` first")
+            status_code=503,
+            detail="Model is not loaded, run `python -m src.main` first",
+        )
 
     try:
+        # 1. Convert Validated Pydantic objects to a DataFrame
         records_dicts = [r.model_dump() for r in req.records]
         df_raw = pd.DataFrame(records_dicts)
 
+        # 2. Clean Data (Reusing Phase 1 logic)
         df_clean = clean_dataframe(df_raw, target_column=None)
 
-        configured_feature_cols = _configured_feature_columns(GLOBAL_CONFIG)
-
-        validation_cfg = require_section(GLOBAL_CONFIG, "validation")
+        # 3. Validate Data (Reusing Phase 1 logic)
+        configured_feature_cols = _configured_feature_columns(global_config)
+        validation_cfg = require_section(global_config, "validation")
         numeric_non_negative_cols = validation_cfg.get(
-            "numeric_non_negative_cols", [])
+            "numeric_non_negative_cols", []
+        )
         if not isinstance(numeric_non_negative_cols, list):
             raise ValueError(
-                "validation.numeric_non_negative_cols must be a list")
+                "validation.numeric_non_negative_cols must be a list"
+            )
 
         validate_dataframe(
             df=df_clean,
             required_columns=configured_feature_cols,
             check_missing_values=bool(
-                validation_cfg.get("check_missing_values", False)),
+                validation_cfg.get("check_missing_values", False)
+            ),
             target_column=None,
             target_allowed_values=None,
             numeric_non_negative_cols=numeric_non_negative_cols,
         )
 
-        problem_cfg = require_section(GLOBAL_CONFIG, "problem")
+        # 4. Handle IDs
+        problem_cfg = require_section(global_config, "problem")
         identifier_col = require_str(problem_cfg, "identifier_column")
 
         ids = (
@@ -272,30 +286,51 @@ def predict(req: PredictRequest) -> PredictResponse:
             else [str(i) for i in range(len(df_clean))]
         )
 
-        X_infer = df_clean.drop(
-            columns=[identifier_col]) if identifier_col in df_clean.columns else df_clean
+        X_infer = (
+            df_clean.drop(columns=[identifier_col])
+            if identifier_col in df_clean.columns
+            else df_clean
+        )
 
-        run_cfg = require_section(GLOBAL_CONFIG, "run")
-        include_proba = bool(run_cfg.get(
-            "include_proba_if_classification", True))
+        # 5. Predict (Reusing Phase 1 logic)
+        run_cfg = require_section(global_config, "run")
+        include_proba = bool(
+            run_cfg.get("include_proba_if_classification", True)
+        )
 
         try:
             df_pred = run_inference(
-                model=MODEL_PIPELINE, X_infer=X_infer, include_proba=include_proba)
+                model=model_pipeline,
+                X_infer=X_infer,
+                include_proba=include_proba,
+            )
         except TypeError:
-            df_pred = run_inference(model=MODEL_PIPELINE, X_infer=X_infer)
+            df_pred = run_inference(
+                model=model_pipeline,
+                X_infer=X_infer,
+            )
 
+        # 6. Format API Response
         preds: List[PredictionItem] = []
         for i in range(len(ids)):
             pred_val = int(df_pred.iloc[i]["prediction"])
             prob_val: Optional[float] = None
+
             if "probability" in df_pred.columns:
                 prob_val = float(df_pred.iloc[i]["probability"])
 
-            preds.append(PredictionItem(
-                ID=ids[i], prediction=pred_val, probability=prob_val))
+            preds.append(
+                PredictionItem(
+                    ID=ids[i],
+                    prediction=pred_val,
+                    probability=prob_val,
+                )
+            )
 
-        return PredictResponse(model_version=MODEL_VERSION, predictions=preds)
+        return PredictResponse(
+            model_version=model_version,
+            predictions=preds,
+        )
 
     except ValueError as e:
         logger.error("Validation error: %s", str(e))
@@ -305,4 +340,6 @@ def predict(req: PredictRequest) -> PredictResponse:
     except Exception as e:
         logger.exception("Prediction failed: %s", str(e))
         raise HTTPException(
-            status_code=500, detail="Internal Server Error") from e
+            status_code=500,
+            detail="Internal Server Error",
+        ) from e
