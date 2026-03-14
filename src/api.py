@@ -28,13 +28,13 @@ from src.validate import validate_dataframe
 # Keep this as the only coupling to main.py to keep the API decoupled
 from src.main import load_config, require_section, require_str, resolve_repo_path
 
-
-logger = logging.getLogger("mlops.api")
+logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
+# Load environment variables from .env (e.g. for config paths or secrets)
 load_dotenv()
 
 
@@ -51,7 +51,8 @@ class PatientRecord(BaseModel):
     In MLOps, silently accepting extra or misspelled features is dangerous 
     and leads to silent pipeline failures. We force upstream systems to be exact.
     """
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid")
 
     ID: str
     rx_ds: float
@@ -197,7 +198,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("API shutdown complete")
 
-
+# Create FastAPI app with the above lifespan
 app = FastAPI(
     title="Opioid Risk Predictor API",
     version="1.0.0",
@@ -251,10 +252,10 @@ def predict(req: PredictRequest) -> PredictResponse:
         records_dicts = [r.model_dump() for r in req.records]
         df_raw = pd.DataFrame(records_dicts)
 
-        # 2. Clean Data (Reusing Phase 1 logic)
+        # 2. Clean Data
         df_clean = clean_dataframe(df_raw, target_column=None)
 
-        # 3. Validate Data (Reusing Phase 1 logic)
+        # 3. Validate Data
         configured_feature_cols = _configured_feature_columns(global_config)
         validation_cfg = require_section(global_config, "validation")
         numeric_non_negative_cols = validation_cfg.get(
@@ -292,7 +293,7 @@ def predict(req: PredictRequest) -> PredictResponse:
             else df_clean
         )
 
-        # 5. Predict (Reusing Phase 1 logic)
+        # 5. Predict
         run_cfg = require_section(global_config, "run")
         include_proba = bool(
             run_cfg.get("include_proba_if_classification", True)
