@@ -52,7 +52,32 @@ class PatientRecord(BaseModel):
     and leads to silent pipeline failures. We force upstream systems to be exact.
     """
     model_config = ConfigDict(
-        extra="forbid")
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "ID": "P001",
+                "rx_ds": 12,
+                "A": 1,
+                "B": 0,
+                "C": 1,
+                "D": 0,
+                "E": 1,
+                "F": 0,
+                "H": 0,
+                "I": 1,
+                "J": 0,
+                "K": 0,
+                "L": 1,
+                "M": 0,
+                "N": 0,
+                "R": 1,
+                "S": 0,
+                "T": 1,
+                "Low_inc": 1,
+                "SURG": 0,
+            }
+        },
+    )
 
     ID: str
     rx_ds: float
@@ -317,8 +342,8 @@ def predict(req: PredictRequest) -> PredictResponse:
             pred_val = int(df_pred.iloc[i]["prediction"])
             prob_val: Optional[float] = None
 
-            if "probability" in df_pred.columns:
-                prob_val = float(df_pred.iloc[i]["probability"])
+            if "proba" in df_pred.columns:
+                prob_val = float(df_pred.iloc[i]["proba"])
 
             preds.append(
                 PredictionItem(
