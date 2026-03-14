@@ -5,8 +5,6 @@ Educational Goal:
 - Responsibility (separation of concerns): Build and return a ColumnTransformer recipe. No file I/O, no .fit() calls here
 - Pipeline contract (inputs and outputs): Inputs are configuration lists. Output is an unfitted ColumnTransformer
 
-TODO: Replace print statements with standard library logging in a later session
-TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
 """
 
 from typing import List, Optional

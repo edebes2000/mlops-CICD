@@ -5,8 +5,6 @@ Educational Goal:
 - Responsibility (separation of concerns): Only loads raw data, no cleaning, validation, training, or evaluation
 - Pipeline contract (inputs and outputs): Input is a raw CSV path, output is a raw DataFrame
 
-TODO: Replace print statements with standard library logging in a later session
-TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
 """
 
 import logging
@@ -16,6 +14,7 @@ import pandas as pd
 from src.utils import load_csv
 
 logger = logging.getLogger(__name__)
+
 
 def load_raw_data(raw_data_path: Path) -> pd.DataFrame:
     """

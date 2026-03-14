@@ -1,4 +1,3 @@
-# config.yaml
 # Single source of truth for non-secret runtime settings
 # Secrets belong in .env only NOT HERE! (example: WANDB_API_KEY)
 
@@ -11,11 +10,11 @@ paths:
   log_file: "logs/pipeline.log"
 
 logging:
-  level: "INFO"                  # "DEBUG", "INFO", "WARNING", "ERROR"
+  level: "INFO" # "DEBUG", "INFO", "WARNING", "ERROR"
 
 problem:
   target_column: "OD"
-  problem_type: "classification"   # "classification" or "regression"
+  problem_type: "classification" # "classification" or "regression"
   identifier_column: "ID"
 
 split:
@@ -30,6 +29,14 @@ training:
     solver: "liblinear"
     random_state: 42
     class_weight: "balanced"
+
+    # Calibration settings
+    # Calibration improves probability reliability, which matters for thresholding,
+    # ranking, and business decisions based on risk scores
+    calibration_enabled: true
+    calibration_method: "sigmoid" # "sigmoid" is a strong simple default for small/medium datasets
+    calibration_cv: 3 # Cross-validation folds used inside CalibratedClassifierCV
+
   regression:
     model_type: "linear_regression"
 
@@ -64,6 +71,9 @@ validation:
     - "rx_ds"
   check_missing_values: false
 
+evaluation:
+  calibration_bins: 10
+
 run:
   include_proba_if_classification: true
   overwrite_outputs: true
@@ -72,13 +82,11 @@ wandb:
   enabled: true
   project: "opioid-risk-classification"
 
-  # --- NEW EXPERIMENT CONTROLS ---
-  name: "02-baseline-logistic-regression"
-  job_type: "baseline"
+  name: "03-calibrated-logistic-regression"
+  job_type: "baseline-calibration"
   group: "session11-baselines"
-  tags: ["baseline", "logreg", "v1"]
-  notes: "Baseline logistic regression for lecture demo"
-  # -------------------------------
+  tags: ["baseline", "logreg", "calibrated"]
+  notes: "Baseline logistic regression with optional probability calibration"
 
   model_artifact_name: "opioid_classification_model"
   log_processed_data: true
@@ -86,6 +94,7 @@ wandb:
 
   log_auc_plots: true
   log_confusion_matrix: true
+  log_calibration_table: true
   log_predictions_table: true
   predictions_table_rows: 200
   class_names: ["No event", "Event"]

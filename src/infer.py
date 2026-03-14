@@ -5,8 +5,7 @@ Educational Goal:
 - Responsibility (separation of concerns): Only runs model.predict and formats outputs. No training or metrics.
 - Pipeline contract: Inputs are a fitted model and a feature DataFrame. Output is a strictly formatted predictions DataFrame.
 
-TODO: Replace print statements with standard library logging in a later session
-TODO: Move any hardcoded configurations to config.yml in a later session
+
 """
 
 import logging
@@ -14,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
 
 def run_inference(model, X_infer: pd.DataFrame, *, include_proba: bool = False) -> pd.DataFrame:
     """

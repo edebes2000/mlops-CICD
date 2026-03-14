@@ -9,11 +9,10 @@ Educational Goal:
 - Responsibility (separation of concerns): Only validation checks, no cleaning, features, training, or metrics logic
 - Pipeline contract (inputs and outputs): Input is a DataFrame and constraint lists, output is True or a raised ValueError
 
-TODO: Replace print statements with standard library logging in a later session
-TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
 """
 
 logger = logging.getLogger(__name__)
+
 
 def validate_dataframe(
     df: pd.DataFrame,
