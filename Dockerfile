@@ -31,8 +31,12 @@ COPY conda-lock.yml .
 # 2. Use conda-lock to install the exact frozen dependencies into the base environment
 # 3. Clean the cache to reduce image size
 RUN conda install -c conda-forge conda-lock -y && \
-    conda-lock install -n base conda-lock.yml && \
+    conda-lock install -n mlops conda-lock.yml && \
     conda clean -afy
+
+# We set the PATH to include the mlops environment so that when we run commands like `uvicorn`,
+# it uses the correct Python environment with all dependencies installed
+ENV PATH=/opt/conda/envs/mlops/bin:$PATH
 
 # Copy the rest of the application code
 # .dockerignore used to exclude unnecessary files (e.g., .git, __pycache__, etc.)
