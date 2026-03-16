@@ -18,6 +18,7 @@ dependencies:
   - pytest-cov
   - pyyaml
   - python-dotenv
+  - joblib
   - wandb
   - fastapi
   - uvicorn
