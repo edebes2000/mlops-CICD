@@ -9,11 +9,10 @@ Educational Goal:
 - Responsibility (separation of concerns): Pure data transformations (standardizing column names, deduplication, dropping missing values) and data observability (logging dropped rows). Strictly NO file I/O and NO model fitting.
 - Pipeline contract (inputs and outputs): Inputs are the raw Pandas DataFrame and the target column name. Output is a cleaned Pandas DataFrame that is guaranteed to have the target column, ready for validation and splitting.
 
-TODO: Replace print statements with standard library logging in a later session
-TODO: Any temporary or hardcoded variable or parameter will be imported from config.yml in a later session
 """
 
 logger = logging.getLogger(__name__)
+
 
 def clean_dataframe(df_raw: pd.DataFrame, target_column: Optional[str] = None) -> pd.DataFrame:
     """

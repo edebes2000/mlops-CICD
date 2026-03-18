@@ -1,4 +1,3 @@
-# src/main.py
 """
 Educational goal
 - Show how an MLOps repo separates orchestration (main) from implementation (src modules)
@@ -34,11 +33,11 @@ import wandb
 from src.logger import configure_logging
 
 from src.clean_data import clean_dataframe
-from src.evaluate import evaluate_model
+from src.evaluate import evaluate_calibration, evaluate_model
 from src.features import get_feature_preprocessor
 from src.infer import run_inference
 from src.load_data import load_raw_data
-from src.train import train_model
+from src.train import calibrate_pipeline, train_model
 from src.utils import save_csv, save_model
 from src.validate import validate_dataframe
 
@@ -164,43 +163,60 @@ def three_way_split(
     """
     if test_size <= 0 or val_size <= 0 or (test_size + val_size) >= 1.0:
         raise ValueError(
-            "Split sizes must satisfy: 0 < test_size, 0 < val_size, and test_size + val_size < 1")
+            "Split sizes must satisfy: 0 < test_size, 0 < val_size, and test_size + val_size < 1"
+        )
 
     stratify_y = y if stratify else None
 
     try:
         X_temp, X_test, y_temp, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=random_state, stratify=stratify_y
+            X,
+            y,
+            test_size=test_size,
+            random_state=random_state,
+            stratify=stratify_y,
         )
 
         relative_val_size = val_size / (1.0 - test_size)
         stratify_temp = y_temp if stratify else None
 
         X_train, X_val, y_train, y_val = train_test_split(
-            X_temp, y_temp, test_size=relative_val_size, random_state=random_state, stratify=stratify_temp
+            X_temp,
+            y_temp,
+            test_size=relative_val_size,
+            random_state=random_state,
+            stratify=stratify_temp,
         )
 
         return X_train, X_val, X_test, y_train, y_val, y_test
 
     except ValueError as e:
         logger.warning(
-            "Stratified split failed, falling back to non-stratified split | error=%s", e)
+            "Stratified split failed, falling back to non-stratified split | error=%s",
+            e,
+        )
 
         X_temp, X_test, y_temp, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=random_state)
+            X,
+            y,
+            test_size=test_size,
+            random_state=random_state,
+        )
 
         relative_val_size = val_size / (1.0 - test_size)
         X_train, X_val, y_train, y_val = train_test_split(
-            X_temp, y_temp, test_size=relative_val_size, random_state=random_state
+            X_temp,
+            y_temp,
+            test_size=relative_val_size,
+            random_state=random_state,
         )
 
         return X_train, X_val, X_test, y_train, y_val, y_test
 
+
 # -----------------------------
 # W&B config helpers
 # -----------------------------
-
-
 def _wandb_is_enabled(cfg: Dict[str, Any]) -> bool:
     wandb_cfg = cfg.get("wandb")
     if not isinstance(wandb_cfg, dict):
@@ -235,6 +251,103 @@ def _wandb_get_int(cfg: Dict[str, Any], key: str, default: int = 0) -> int:
         return default
 
 
+def _wandb_get_list(cfg: Dict[str, Any], key: str) -> List[str]:
+    """Safely extract a list of strings, stripping whitespace and dropping empty values."""
+    wandb_cfg = cfg.get("wandb")
+    if not isinstance(wandb_cfg, dict):
+        return []
+
+    value = wandb_cfg.get(key, [])
+    if not isinstance(value, list):
+        return []
+
+    out: List[str] = []
+    for v in value:
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            out.append(s)
+    return out
+
+
+def _log_wandb_classification_artifacts(
+    cfg: Dict[str, Any],
+    X_val: pd.DataFrame,
+    y_val: pd.Series,
+    model_obj,
+    stage_name: str,
+) -> None:
+    """
+    Log optional classification plots and tables to W&B.
+
+    Why this helper exists
+    - Keep main() readable while avoiding duplicated W&B code for before/after calibration
+    """
+    if not hasattr(model_obj, "predict_proba"):
+        logger.warning(
+            "Skipping W&B classification artifacts for stage '%s' because model has no predict_proba()",
+            stage_name,
+        )
+        return
+
+    class_names = (
+        cfg.get("wandb", {}).get("class_names", None)
+        if isinstance(cfg.get("wandb"), dict)
+        else None
+    )
+
+    y_probas_val = model_obj.predict_proba(X_val)
+
+    if _wandb_get_bool(cfg, "log_auc_plots", default=False):
+        wandb.log(
+            {
+                f"plots/roc_curve_val_{stage_name}": wandb.plot.roc_curve(
+                    y_true=y_val.tolist(),
+                    y_probas=y_probas_val,
+                    labels=class_names,
+                    title=f"Validation ROC Curve ({stage_name})",
+                ),
+                f"plots/pr_curve_val_{stage_name}": wandb.plot.pr_curve(
+                    y_true=y_val.tolist(),
+                    y_probas=y_probas_val,
+                    labels=class_names,
+                    title=f"Validation Precision-Recall Curve ({stage_name})",
+                ),
+            }
+        )
+
+    if _wandb_get_bool(cfg, "log_confusion_matrix", default=False):
+        y_pred_val = model_obj.predict(X_val)
+        wandb.log(
+            {
+                f"plots/confusion_matrix_val_{stage_name}": wandb.plot.confusion_matrix(
+                    probs=None,
+                    y_true=y_val.tolist(),
+                    preds=y_pred_val.tolist() if hasattr(y_pred_val, "tolist") else list(y_pred_val),
+                    class_names=class_names,
+                    title=f"Validation Confusion Matrix ({stage_name})",
+                )
+            }
+        )
+
+    if _wandb_get_bool(cfg, "log_calibration_table", default=False):
+        eval_cfg = cfg.get("evaluation", {})
+        calibration_bins = int(eval_cfg.get("calibration_bins", 10)) if isinstance(
+            eval_cfg, dict) else 10
+
+        y_prob_pos = y_probas_val[:, 1]
+        calib_table, _ = evaluate_calibration(
+            y_true=y_val,
+            y_prob=y_prob_pos,
+            n_bins=calibration_bins,
+        )
+
+        if not calib_table.empty:
+            wandb.log(
+                {f"tables/calibration_val_{stage_name}": wandb.Table(dataframe=calib_table)})
+
+
 def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
 
@@ -264,21 +377,44 @@ def main() -> None:
         log_file=log_file_path,
     )
 
-    # Initialize W&B run if enabled in config
+    # -----------------------------
+    # Initialize W&B Experiment Tracking
+    # -----------------------------
     wandb_run = None
     if _wandb_is_enabled(cfg):
         wandb_project = _wandb_get_str(cfg, "project")
         if not wandb_project:
             raise ValueError(
-                "config.yaml: wandb.project must be a non-empty string when wandb.enabled is true")
+                "config.yaml: wandb.project must be a non-empty string when wandb.enabled is true"
+            )
+
+        wandb_name = _wandb_get_str(cfg, "name")
+        wandb_job_type = _wandb_get_str(
+            cfg, "job_type", default="factory-pipeline")
+        wandb_group = _wandb_get_str(cfg, "group")
+        wandb_notes = _wandb_get_str(cfg, "notes")
+        wandb_tags = _wandb_get_list(cfg, "tags")
 
         wandb_run = wandb.init(
             project=wandb_project,
+            name=wandb_name if wandb_name else None,
+            job_type=wandb_job_type,
+            group=wandb_group if wandb_group else None,
+            notes=wandb_notes if wandb_notes else None,
+            tags=wandb_tags if wandb_tags else None,
             config=cfg,
-            job_type="factory-pipeline",
         )
-        logger.info("Initialized W&B run | name=%s | project=%s",
-                    wandb_run.name, wandb_project)
+
+        wandb_run.summary["entrypoint"] = "python -m src.main"
+        wandb_run.summary["model_artifact_path"] = str(
+            require_str(paths_cfg, "model_artifact"))
+
+        logger.info(
+            "Initialized W&B run | name=%s | project=%s | job_type=%s",
+            wandb_run.name,
+            wandb_project,
+            wandb_job_type,
+        )
     else:
         logger.info("W&B disabled, continuing without experiment tracking")
 
@@ -289,7 +425,8 @@ def main() -> None:
             require_str(problem_cfg, "problem_type"))
         if problem_type not in {"classification", "regression"}:
             raise ValueError(
-                "config.yaml: problem.problem_type must be 'classification' or 'regression'")
+                "config.yaml: problem.problem_type must be 'classification' or 'regression'"
+            )
 
         target_column = require_str(problem_cfg, "target_column")
         identifier_column = require_str(problem_cfg, "identifier_column")
@@ -326,7 +463,8 @@ def main() -> None:
         )
         if not configured_cols:
             raise ValueError(
-                "config.yaml: features must define at least 1 column across the feature lists")
+                "config.yaml: features must define at least 1 column across the feature lists"
+            )
 
         # Validation config
         numeric_non_negative_cols = require_list(
@@ -446,10 +584,10 @@ def main() -> None:
         )
 
         # -----------------------------
-        # 7) Train
+        # 7) Train base model
         # -----------------------------
-        logger.info("7) TRAIN model pipeline")
-        model_pipeline = train_model(
+        logger.info("7) TRAIN base model pipeline")
+        base_model = train_model(
             X_train=X_train,
             y_train=y_train,
             preprocessor=preprocessor,
@@ -457,70 +595,77 @@ def main() -> None:
             model_params=model_params,
         )
 
+        models_to_evaluate = [("before_calibration", base_model)]
+        final_model = base_model
+
         # -----------------------------
-        # 8) Evaluate (validation)
+        # 7.5) Optional calibration
+        # -----------------------------
+        calibration_enabled = bool(
+            model_params.get("calibration_enabled", False))
+
+        if problem_type == "classification" and calibration_enabled:
+            logger.info("7.5) CALIBRATE classification probabilities")
+
+            calibration_method = str(model_params.get(
+                "calibration_method", "sigmoid")).strip().lower()
+            calibration_cv = int(model_params.get("calibration_cv", 3))
+
+            final_model = calibrate_pipeline(
+                pipeline=base_model,
+                X_train=X_train,
+                y_train=y_train,
+                method=calibration_method,
+                cv=calibration_cv,
+            )
+            models_to_evaluate.append(("after_calibration", final_model))
+        else:
+            logger.info("7.5) Calibration skipped")
+
+        # -----------------------------
+        # 8) Evaluate on validation split
         # -----------------------------
         logger.info("8) EVALUATE on validation split")
-        val_metrics = evaluate_model(
-            model=model_pipeline,
-            X_eval=X_val,
-            y_eval=y_val,
-            problem_type=problem_type,
-        )
-        logger.info("Validation metrics: %s", val_metrics)
 
-        if wandb_run is not None:
-            wandb.log({f"metrics/val/{k}": float(v)
-                      for k, v in val_metrics.items()})
+        val_metrics_comparison: Dict[str, Dict[str, float]] = {}
 
-        # Optional: interactive evaluation plots in W&B (classification only)
-        if wandb_run is not None and problem_type == "classification":
-            class_names = cfg.get("wandb", {}).get(
-                "class_names", None) if isinstance(cfg.get("wandb"), dict) else None
+        for stage_name, model_obj in models_to_evaluate:
+            logger.info("Evaluating validation stage: %s", stage_name)
 
-            if _wandb_get_bool(cfg, "log_auc_plots", default=False):
-                if hasattr(model_pipeline, "predict_proba"):
-                    y_probas_val = model_pipeline.predict_proba(X_val)
+            val_metrics = evaluate_model(
+                model=model_obj,
+                X_eval=X_val,
+                y_eval=y_val,
+                problem_type=problem_type,
+            )
+            val_metrics_comparison[stage_name] = val_metrics
+            logger.info("Validation metrics [%s]: %s", stage_name, val_metrics)
 
-                    wandb.log(
-                        {
-                            "plots/roc_curve_val": wandb.plot.roc_curve(
-                                y_true=y_val.tolist(),
-                                y_probas=y_probas_val,
-                                labels=class_names,
-                                title="Validation ROC Curve",
-                            ),
-                            "plots/pr_curve_val": wandb.plot.pr_curve(
-                                y_true=y_val.tolist(),
-                                y_probas=y_probas_val,
-                                labels=class_names,
-                                title="Validation Precision-Recall Curve",
-                            ),
-                        }
-                    )
-                else:
-                    logger.warning(
-                        "Skipping ROC/PR plots because model has no predict_proba()")
+            if wandb_run is not None:
+                wandb.log({f"metrics/val_{stage_name}/{k}": float(v)
+                          for k, v in val_metrics.items()})
 
-            if _wandb_get_bool(cfg, "log_confusion_matrix", default=False):
-                y_pred_val = model_pipeline.predict(X_val)
-                wandb.log(
-                    {
-                        "plots/confusion_matrix_val": wandb.plot.confusion_matrix(
-                            probs=None,
-                            y_true=y_val.tolist(),
-                            preds=y_pred_val.tolist() if hasattr(y_pred_val, "tolist") else list(y_pred_val),
-                            class_names=class_names,
-                            title="Validation Confusion Matrix",
-                        )
-                    }
+            if wandb_run is not None and problem_type == "classification":
+                _log_wandb_classification_artifacts(
+                    cfg=cfg,
+                    X_val=X_val,
+                    y_val=y_val,
+                    model_obj=model_obj,
+                    stage_name=stage_name,
                 )
+
+        if wandb_run is not None and len(val_metrics_comparison) > 1:
+            comparison_df = pd.DataFrame.from_dict(
+                val_metrics_comparison, orient="index").reset_index()
+            comparison_df = comparison_df.rename(columns={"index": "stage"})
+            wandb.log(
+                {"tables/metrics_comparison_val": wandb.Table(dataframe=comparison_df)})
 
         # -----------------------------
         # 9) Save model artifact
         # -----------------------------
         logger.info("9) SAVE model artifact")
-        save_model(model_pipeline, model_artifact_path)
+        save_model(final_model, model_artifact_path)
 
         if wandb_run is not None:
             model_artifact_name = _wandb_get_str(
@@ -528,7 +673,7 @@ def main() -> None:
             model_artifact = wandb.Artifact(
                 name=model_artifact_name,
                 type="model",
-                description="Scikit-learn pipeline (preprocessing + estimator)",
+                description="Scikit-learn pipeline or calibrated model artifact",
             )
             model_artifact.add_file(str(model_artifact_path))
             wandb.log_artifact(model_artifact)
@@ -572,9 +717,11 @@ def main() -> None:
             problem_type == "classification") and include_proba_if_classification
 
         df_predictions = run_inference(
-            model=model_pipeline, X_infer=X_infer, include_proba=include_proba)
+            model=final_model,
+            X_infer=X_infer,
+            include_proba=include_proba,
+        )
 
-        # Optional: interactive predictions preview table in W&B
         if wandb_run is not None and _wandb_get_bool(cfg, "log_predictions_table", default=False):
             n_rows = _wandb_get_int(cfg, "predictions_table_rows", default=200)
             sample_df = df_predictions.head(n_rows)

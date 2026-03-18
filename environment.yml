@@ -18,5 +18,11 @@ dependencies:
   - pytest-cov
   - pyyaml
   - python-dotenv
+  - joblib
   - wandb
+  - fastapi
+  - uvicorn
+  - pydantic
+  - httpx
+  - conda-lock
   - pip

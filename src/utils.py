@@ -5,7 +5,6 @@ Educational Goal:
 - Responsibility (separation of concerns): Only basic CSV read/write and model save/load.
 - Pipeline contract: Agnostic plumbing. It does not know business logic or pipeline state.
 
-TODO: Replace print statements with standard library logging in a later session
 """
 
 import logging
@@ -14,6 +13,7 @@ import pandas as pd
 import joblib
 
 logger = logging.getLogger(__name__)
+
 
 def load_csv(filepath: Path) -> pd.DataFrame:
     """

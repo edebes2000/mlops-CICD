@@ -1,4 +1,3 @@
-# tests/test_main.py
 """
 Educational Goal:
 - Verify orchestrator correctness with a config-driven pipeline
@@ -8,11 +7,12 @@ Educational Goal:
 """
 
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import joblib
 import pandas as pd
 import pytest
+from sklearn.calibration import CalibratedClassifierCV
 
 import src.main as main_module
 
@@ -22,18 +22,23 @@ import src.main as main_module
 # --------------------------------------------------------
 @pytest.fixture
 def dummy_split_data() -> Tuple[pd.DataFrame, pd.Series]:
-    """Predictable dataset for split testing (100 rows, imbalanced target)"""
+    """Predictable dataset for split testing (100 rows, imbalanced target)."""
     X = pd.DataFrame({"feature1": range(100), "feature2": range(100)})
     y = pd.Series([0] * 80 + [1] * 20, name="target")
     return X, y
 
 
 def test_three_way_split_correct_sizes(dummy_split_data):
-    """Ensure the math correctly partitions a 100-row dataset"""
+    """Ensure the math correctly partitions a 100-row dataset."""
     X, y = dummy_split_data
 
     X_train, X_val, X_test, y_train, y_val, y_test = main_module.three_way_split(
-        X, y, test_size=0.10, val_size=0.20, random_state=42, stratify=False
+        X,
+        y,
+        test_size=0.10,
+        val_size=0.20,
+        random_state=42,
+        stratify=False,
     )
 
     assert len(X_test) == 10
@@ -45,24 +50,33 @@ def test_three_way_split_correct_sizes(dummy_split_data):
 
 
 def test_three_way_split_stratification_preserves_ratio(dummy_split_data):
-    """Ensure classification splits preserve the 80/20 class imbalance"""
+    """Ensure classification splits preserve the 80/20 class imbalance."""
     X, y = dummy_split_data
 
     _, _, _, _, _, y_test = main_module.three_way_split(
-        X, y, test_size=0.10, val_size=0.20, random_state=42, stratify=True
+        X,
+        y,
+        test_size=0.10,
+        val_size=0.20,
+        random_state=42,
+        stratify=True,
     )
 
-    # With 80/20 overall and 10 test rows, we expect exactly 2 positive labels in the test set
     assert (y_test == 1).sum() == 2
 
 
 def test_three_way_split_invalid_sizes_raises(dummy_split_data):
-    """Crash if configuration asks for impossible split ratios"""
+    """Crash if configuration asks for impossible split ratios."""
     X, y = dummy_split_data
 
     with pytest.raises(ValueError, match="Split sizes must satisfy"):
         main_module.three_way_split(
-            X, y, test_size=0.60, val_size=0.50, random_state=42, stratify=False
+            X,
+            y,
+            test_size=0.60,
+            val_size=0.50,
+            random_state=42,
+            stratify=False,
         )
 
 
@@ -72,7 +86,7 @@ def test_three_way_split_invalid_sizes_raises(dummy_split_data):
 def _binary_sum_cols_for_tests() -> List[str]:
     """
     Keep this local to the test suite so tests do not depend on internal module constants.
-    Must match config.yaml used in the test.
+    Must match the feature configuration used in the test config.
     """
     return [
         "A",
@@ -97,7 +111,7 @@ def _binary_sum_cols_for_tests() -> List[str]:
 
 
 def _make_synthetic_raw_df(binary_sum_cols: List[str], n_rows: int = 200) -> pd.DataFrame:
-    """Build a minimal dataset matching the feature config and target expectations"""
+    """Build a minimal dataset matching the feature config and target expectations."""
     df = pd.DataFrame(
         {
             "ID": list(range(n_rows)),
@@ -106,13 +120,14 @@ def _make_synthetic_raw_df(binary_sum_cols: List[str], n_rows: int = 200) -> pd.
         }
     )
     for col in binary_sum_cols:
-        df[col] = [(i % 2) for i in range(n_rows)]
+        df[col] = [i % 2 for i in range(n_rows)]
     return df
 
 
 def _make_synthetic_inference_df(binary_sum_cols: List[str], n_rows: int = 10) -> pd.DataFrame:
     """
-    Build inference inputs that match feature expectations
+    Build inference inputs that match feature expectations.
+
     Notes
     - No OD column by design
     - Includes ID for traceability
@@ -124,34 +139,43 @@ def _make_synthetic_inference_df(binary_sum_cols: List[str], n_rows: int = 10) -
         }
     )
     for col in binary_sum_cols:
-        df[col] = [(i % 2) for i in range(n_rows)]
+        df[col] = [i % 2 for i in range(n_rows)]
     return df
 
 
 def _make_test_config(tmp_path: Path, binary_sum_cols: List[str]) -> Dict[str, Any]:
     """
     Build an in-memory config dict that mirrors the real config.yaml schema.
+
     We return a dict and monkeypatch main_module.load_config to return it.
+    This keeps the test isolated from the real repo config file.
     """
-    raw_path = tmp_path / "data" / "raw" / "opiod_raw_data.csv"
+    raw_path = tmp_path / "data" / "raw" / "opioid_raw_data.csv"
     clean_path = tmp_path / "data" / "processed" / "clean.csv"
     model_path = tmp_path / "models" / "model.joblib"
     inference_path = tmp_path / "data" / "inference" / "opioid_infer_01.csv"
     predictions_path = tmp_path / "reports" / "predictions.csv"
-    log_file_path = tmp_path / "logs" / "pipeline.log" # <-- ADDED THIS
+    log_file_path = tmp_path / "logs" / "pipeline.log"
 
     return {
         "paths": {
-            # Values are strings because main resolves them relative to project root
             "raw_data": str(raw_path),
             "processed_data": str(clean_path),
             "model_artifact": str(model_path),
             "inference_data": str(inference_path),
             "predictions_artifact": str(predictions_path),
-            "log_file": str(log_file_path), # <-- ADDED THIS
+            "log_file": str(log_file_path),
         },
-        "problem": {"target_column": "OD", "problem_type": "classification", "identifier_column": "ID"},
-        "split": {"test_size": 0.10, "val_size": 0.20, "random_state": 42},
+        "problem": {
+            "target_column": "OD",
+            "problem_type": "classification",
+            "identifier_column": "ID",
+        },
+        "split": {
+            "test_size": 0.10,
+            "val_size": 0.20,
+            "random_state": 42,
+        },
         "features": {
             "quantile_bin": ["rx_ds"],
             "categorical_onehot": [],
@@ -159,9 +183,21 @@ def _make_test_config(tmp_path: Path, binary_sum_cols: List[str]) -> Dict[str, A
             "binary_sum_cols": binary_sum_cols,
             "n_bins": 4,
         },
-        "validation": {"numeric_non_negative_cols": ["rx_ds"], "check_missing_values": False},
-        "run": {"include_proba_if_classification": True, "overwrite_outputs": True},
-        "logging": {"level": "INFO", "format": "text"},
+        "validation": {
+            "numeric_non_negative_cols": ["rx_ds"],
+            "check_missing_values": False,
+        },
+        "evaluation": {
+            "calibration_bins": 5,
+        },
+        "run": {
+            "include_proba_if_classification": True,
+            "overwrite_outputs": True,
+        },
+        "logging": {
+            "level": "INFO",
+            "format": "text",
+        },
         "training": {
             "classification": {
                 "model_type": "logistic_regression",
@@ -169,8 +205,13 @@ def _make_test_config(tmp_path: Path, binary_sum_cols: List[str]) -> Dict[str, A
                 "solver": "liblinear",
                 "random_state": 42,
                 "class_weight": "balanced",
+                "calibration_enabled": True,
+                "calibration_method": "sigmoid",
+                "calibration_cv": 3,
             },
-            "regression": {"model_type": "linear_regression"},
+            "regression": {
+                "model_type": "linear_regression",
+            },
         },
     }
 
@@ -178,7 +219,6 @@ def _make_test_config(tmp_path: Path, binary_sum_cols: List[str]) -> Dict[str, A
 def _patch_config_loader(monkeypatch, cfg: Dict[str, Any]):
     """
     Patch main_module.load_config so main() reads our in-memory config.
-    This keeps the test isolated and avoids having to build a temp repo root.
     """
 
     def _fake_load_config(_config_path: Path) -> Dict[str, Any]:
@@ -188,7 +228,10 @@ def _patch_config_loader(monkeypatch, cfg: Dict[str, Any]):
 
 
 def test_main_end_to_end_creates_clean_model_and_predictions_artifacts(tmp_path, monkeypatch):
-    """Proves the pipeline cleans data, trains a model, and saves artifacts including inference outputs"""
+    """
+    Proves the pipeline cleans data, trains a calibrated model,
+    and saves artifacts including inference outputs.
+    """
     binary_sum_cols = _binary_sum_cols_for_tests()
     cfg = _make_test_config(tmp_path, binary_sum_cols)
     _patch_config_loader(monkeypatch, cfg)
@@ -200,10 +243,13 @@ def test_main_end_to_end_creates_clean_model_and_predictions_artifacts(tmp_path,
     predictions_path = Path(cfg["paths"]["predictions_artifact"])
 
     raw_path.parent.mkdir(parents=True, exist_ok=True)
-    _make_synthetic_raw_df(binary_sum_cols=binary_sum_cols, n_rows=200).to_csv(raw_path, index=False)
+    _make_synthetic_raw_df(binary_sum_cols=binary_sum_cols,
+                           n_rows=200).to_csv(raw_path, index=False)
 
     inference_path.parent.mkdir(parents=True, exist_ok=True)
-    _make_synthetic_inference_df(binary_sum_cols=binary_sum_cols, n_rows=10).to_csv(inference_path, index=False)
+    _make_synthetic_inference_df(binary_sum_cols=binary_sum_cols, n_rows=10).to_csv(
+        inference_path, index=False
+    )
 
     main_module.main()
 
@@ -215,7 +261,9 @@ def test_main_end_to_end_creates_clean_model_and_predictions_artifacts(tmp_path,
     # Model artifact
     assert model_path.exists()
     model = joblib.load(model_path)
+    assert isinstance(model, CalibratedClassifierCV)
     assert hasattr(model, "predict")
+    assert hasattr(model, "predict_proba")
 
     # Predictions artifact
     assert predictions_path.exists()
@@ -230,10 +278,14 @@ def test_main_end_to_end_creates_clean_model_and_predictions_artifacts(tmp_path,
     assert df_preds["ID"].notna().all()
 
 
-def test_main_calls_evaluate_and_infer_modules(tmp_path, monkeypatch):
+def test_main_calls_evaluate_twice_and_infer_once_when_calibration_enabled(tmp_path, monkeypatch):
     """
-    Spy test
-    We intercept calls to ensure the orchestrator delegates work to the correct modules
+    Spy test.
+
+    We intercept calls to ensure the orchestrator:
+    - evaluates before calibration
+    - evaluates after calibration
+    - runs inference once with the final saved model
     """
     binary_sum_cols = _binary_sum_cols_for_tests()
     cfg = _make_test_config(tmp_path, binary_sum_cols)
@@ -243,12 +295,16 @@ def test_main_calls_evaluate_and_infer_modules(tmp_path, monkeypatch):
     inference_path = Path(cfg["paths"]["inference_data"])
 
     raw_path.parent.mkdir(parents=True, exist_ok=True)
-    _make_synthetic_raw_df(binary_sum_cols=binary_sum_cols, n_rows=200).to_csv(raw_path, index=False)
+    _make_synthetic_raw_df(binary_sum_cols=binary_sum_cols,
+                           n_rows=200).to_csv(raw_path, index=False)
 
     inference_path.parent.mkdir(parents=True, exist_ok=True)
-    _make_synthetic_inference_df(binary_sum_cols=binary_sum_cols, n_rows=10).to_csv(inference_path, index=False)
+    _make_synthetic_inference_df(binary_sum_cols=binary_sum_cols, n_rows=10).to_csv(
+        inference_path, index=False
+    )
 
     called = {"evaluate": 0, "infer": 0}
+
     original_evaluate = main_module.evaluate_model
     original_infer = main_module.run_inference
 
@@ -265,12 +321,12 @@ def test_main_calls_evaluate_and_infer_modules(tmp_path, monkeypatch):
 
     main_module.main()
 
-    assert called["evaluate"] == 1
+    assert called["evaluate"] == 2
     assert called["infer"] == 1
 
 
 def test_main_raises_when_raw_data_missing(tmp_path, monkeypatch):
-    """Pipeline must crash immediately if raw input data is missing"""
+    """Pipeline must crash immediately if raw input data is missing."""
     binary_sum_cols = _binary_sum_cols_for_tests()
     cfg = _make_test_config(tmp_path, binary_sum_cols)
     _patch_config_loader(monkeypatch, cfg)
